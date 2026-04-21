@@ -34,6 +34,7 @@ public:
 
     bool isRecording() const { return recording.load(); }
     Mode getMode()     const { return currentMode; }
+    juce::File getLastOutputFolder() const { return lastOutputFolder; }
 
     /** Call from audio thread with the raw (pre-strip) input buffer. */
     void writeInputBlock  (const juce::AudioBuffer<float>& buffer);
@@ -51,6 +52,7 @@ private:
     std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> inputWriter;
     std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> outputWriter;
 
+    juce::File            lastOutputFolder;
     juce::TimeSliceThread backgroundThread { "RecorderThread" };
 
     static juce::File makeOutputFile (const juce::File& folder,

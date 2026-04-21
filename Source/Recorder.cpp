@@ -24,6 +24,7 @@ bool Recorder::startRecording (const juce::File& outputFolder, Mode mode)
     if (recording.load()) stopRecording();
 
     currentMode = mode;
+    lastOutputFolder = outputFolder;
     outputFolder.createDirectory();
 
     auto makeWriter = [&] (const juce::String& label)

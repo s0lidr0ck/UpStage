@@ -23,6 +23,9 @@ public:
 
     double getPositionNormalised() const;
     int    getLoopLengthSamples() const { return loopLength; }
+    double getLoopLengthSeconds() const { return loopLength > 0 ? (double) loopLength / sampleRate : 0.0; }
+    double getElapsedSeconds() const;
+
 
 private:
     std::atomic<State> state { State::Idle };

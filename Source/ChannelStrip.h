@@ -25,6 +25,7 @@ public:
     // Setup
     void prepare (double sampleRate, int blockSize);
     void releaseResources();
+    void setPlayHead (juce::AudioPlayHead* ph) { playHead = ph; }
 
     //==========================================================================
     // Plugin management
@@ -74,8 +75,8 @@ public:
     // Gain
     void  setInputGain  (float gain);
     void  setOutputGain (float gain);
-    float getInputGain()  const { return inputGain.load();  }
-    float getOutputGain() const { return outputGain.load(); }
+    float getInputGain()  const { return inputGainTarget.load();  }
+    float getOutputGain() const { return outputGainTarget.load(); }
 
     // Pan (-1.0 = full left, 0.0 = centre, 1.0 = full right)
     void  setPan (float p)   { pan.store (juce::jlimit (-1.0f, 1.0f, p)); }
@@ -97,8 +98,10 @@ private:
     bool   active = false;
     juce::String name;
 
-    std::atomic<float> inputGain  { 1.0f };
-    std::atomic<float> outputGain { 1.0f };
+    juce::SmoothedValue<float> inputGainSmoothed  { 1.0f };
+    juce::SmoothedValue<float> outputGainSmoothed { 1.0f };
+    std::atomic<float> inputGainTarget  { 1.0f };
+    std::atomic<float> outputGainTarget { 1.0f };
     std::atomic<float> pan        { 0.0f };
 
     double currentSampleRate = 44100.0;
@@ -106,6 +109,7 @@ private:
 
     juce::AudioPluginFormatManager& formatManager;
 
+    juce::AudioPlayHead*      playHead = nullptr;
     juce::Array<PluginEntry*> pluginChain;
     juce::CriticalSection     chainLock;
 

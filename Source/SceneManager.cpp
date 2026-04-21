@@ -5,6 +5,7 @@ SceneManager::SceneManager() {}
 //==============================================================================
 void SceneManager::captureScene (int idx,
                                   ChannelStrip** channels,
+                                  const GlobalState& globals,
                                   const juce::String& name)
 {
     if (! juce::isPositiveAndBelow (idx, NUM_SCENES)) return;
@@ -12,18 +13,22 @@ void SceneManager::captureScene (int idx,
     scenes[idx].name = name.isEmpty() ? ("Scene " + juce::String (idx + 1)) : name;
     for (int i = 0; i < NUM_CHANNELS; ++i)
         scenes[idx].channels[i] = channels[i]->getState();
+    scenes[idx].globals = globals;
 }
 
-bool SceneManager::applyScene (int idx,
-                                ChannelStrip** channels)
+SceneManager::ApplyResult SceneManager::applyScene (int idx,
+                                                     ChannelStrip** channels)
 {
-    if (! juce::isPositiveAndBelow (idx, NUM_SCENES)) return false;
-    if (! scenes[idx].used) return false;
+    ApplyResult result;
+    if (! juce::isPositiveAndBelow (idx, NUM_SCENES)) return result;
+    if (! scenes[idx].used) return result;
 
     for (int i = 0; i < NUM_CHANNELS; ++i)
         channels[i]->setState (scenes[idx].channels[i]);
 
-    return true;
+    result.success = true;
+    result.globals = scenes[idx].globals;
+    return result;
 }
 
 //==============================================================================
@@ -50,6 +55,14 @@ void SceneManager::clearScene (int idx)
         scenes[idx] = Scene();
 }
 
+ChannelState SceneManager::getChannelState (int sceneIdx, int chanIdx) const
+{
+    if (juce::isPositiveAndBelow (sceneIdx, NUM_SCENES) &&
+        juce::isPositiveAndBelow (chanIdx, NUM_CHANNELS))
+        return scenes[sceneIdx].channels[chanIdx];
+    return {};
+}
+
 //==============================================================================
 void SceneManager::saveToXml (juce::XmlElement& parent) const
 {
@@ -60,6 +73,22 @@ void SceneManager::saveToXml (juce::XmlElement& parent) const
         auto* sceneEl = scenesEl->createNewChildElement ("Scene");
         sceneEl->setAttribute ("index", i);
         sceneEl->setAttribute ("name",  scenes[i].name);
+
+        // Global state (gate, trim, FxBus)
+        auto* globEl = sceneEl->createNewChildElement ("Globals");
+        globEl->setAttribute ("gateEnabled",  scenes[i].globals.gateEnabled ? 1 : 0);
+        globEl->setAttribute ("gateThreshDb", scenes[i].globals.gateThreshDb);
+        globEl->setAttribute ("inputTrimDb",  scenes[i].globals.inputTrimDb);
+        globEl->setAttribute ("fxBypassed",   scenes[i].globals.fxBusState.bypassed ? 1 : 0);
+        for (const auto& slot : scenes[i].globals.fxBusState.plugins)
+        {
+            auto* fxPlugEl = globEl->createNewChildElement ("FxPlugin");
+            fxPlugEl->setAttribute ("id",       slot.pluginIdentifier);
+            fxPlugEl->setAttribute ("name",     slot.pluginName);
+            fxPlugEl->setAttribute ("bypassed", slot.isBypassed ? 1 : 0);
+            if (slot.stateData.getSize() > 0)
+                fxPlugEl->addTextElement (slot.stateData.toBase64Encoding());
+        }
 
         for (int c = 0; c < NUM_CHANNELS; ++c)
         {
@@ -98,6 +127,26 @@ void SceneManager::loadFromXml (const juce::XmlElement& parent)
 
         scenes[idx].used = true;
         scenes[idx].name = sceneEl->getStringAttribute ("name");
+
+        if (auto* globEl = sceneEl->getChildByName ("Globals"))
+        {
+            scenes[idx].globals.gateEnabled  = globEl->getIntAttribute ("gateEnabled", 0) != 0;
+            scenes[idx].globals.gateThreshDb = (float) globEl->getDoubleAttribute ("gateThreshDb", -60.0);
+            scenes[idx].globals.inputTrimDb  = (float) globEl->getDoubleAttribute ("inputTrimDb", 0.0);
+            scenes[idx].globals.fxBusState.bypassed = globEl->getIntAttribute ("fxBypassed", 0) != 0;
+            scenes[idx].globals.fxBusState.plugins.clear();
+            for (auto* fxPlugEl : globEl->getChildWithTagNameIterator ("FxPlugin"))
+            {
+                PluginSlotState slot;
+                slot.pluginIdentifier = fxPlugEl->getStringAttribute ("id");
+                slot.pluginName       = fxPlugEl->getStringAttribute ("name");
+                slot.isBypassed       = fxPlugEl->getBoolAttribute   ("bypassed");
+                auto b64 = fxPlugEl->getAllSubText().trim();
+                if (b64.isNotEmpty())
+                    slot.stateData.fromBase64Encoding (b64);
+                scenes[idx].globals.fxBusState.plugins.add (slot);
+            }
+        }
 
         for (auto* chEl : sceneEl->getChildWithTagNameIterator ("Channel"))
         {

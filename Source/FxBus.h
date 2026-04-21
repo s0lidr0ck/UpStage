@@ -23,6 +23,7 @@ public:
     //==========================================================================
     void prepare        (double sampleRate, int blockSize);
     void releaseResources();
+    void setPlayHead    (juce::AudioPlayHead* ph) { playHead = ph; }
 
     //==========================================================================
     bool addPlugin   (const juce::PluginDescription& desc,
@@ -68,6 +69,7 @@ private:
     mutable juce::CriticalSection chainLock;
 
     std::atomic<bool> bypassed { false };
+    juce::AudioPlayHead* playHead = nullptr;
 
     double currentSampleRate = 44100.0;
     int    currentBlockSize  = 256;

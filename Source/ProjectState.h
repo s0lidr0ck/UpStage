@@ -22,6 +22,13 @@ struct PluginSlotState
     bool         isBypassed = false;
 };
 
+struct PluginAppearanceState
+{
+    juce::String pluginName;
+    juce::Colour tint { 0x00000000 };
+    juce::String nickname;
+};
+
 struct ChannelState
 {
     juce::String              name;
@@ -29,6 +36,7 @@ struct ChannelState
     float                     inputGain  = 1.0f;
     float                     outputGain = 1.0f;
     float                     pan        = 0.0f;
+    juce::Array<PluginAppearanceState> pluginAppearances;
 };
 
 struct MidiRule
@@ -110,6 +118,9 @@ struct ProjectData
         juce::Array<PluginSlotState> plugins;
     };
     FxBusState fxBusState;
+
+    // Knob color customizations (component ID → color name)
+    std::map<juce::String, juce::String> knobColorMap;
 
     // Scenes and MIDI learn are saved/loaded via SceneManager/MidiLearnManager
     // and stored in the same XML file as child elements.

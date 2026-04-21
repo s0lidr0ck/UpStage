@@ -22,6 +22,8 @@
 #include "PluginBrowserWindow.h"
 #include "Metronome.h"
 #include "Looper.h"
+#include "SignalChainView.h"
+#include "MidiRulesPanel.h"
 
 /**
  * MainComponent  v0.4 - Mixer-Style Layout
@@ -45,6 +47,7 @@
  *   PC 127   → setlist next song
  */
 class MainComponent : public juce::AudioAppComponent,
+                      public juce::AudioPlayHead,
                       public juce::MidiInputCallback,
                       public juce::Timer,
                       public juce::Button::Listener,
@@ -65,6 +68,9 @@ public:
 
     // MidiInputCallback
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+
+    // AudioPlayHead
+    juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override;
 
     // Component
     void paint  (juce::Graphics& g) override;
@@ -119,7 +125,10 @@ private:
     int    currentBlockSize  = 256;
     bool   projectDirty      = false;
     bool   outputMuted       = false;  // true while tuner is active
+    int    autosaveCounter   = 0;
     std::atomic<float> masterOutputGain { 1.0f };
+    std::atomic<bool>  midiActivityFlag { false };
+    int                midiFlashCounter = 0;
 
     // Undo/redo
     juce::UndoManager undoManager { 30000, 100 };
@@ -182,6 +191,8 @@ private:
     //==========================================================================
     // MIDI output (for MIDI clock)
     std::unique_ptr<juce::MidiOutput> midiOutput;
+    juce::String activeMidiInputId;
+    juce::String activeMidiOutputId;
 
     //==========================================================================
     // Project state
@@ -236,6 +247,8 @@ private:
 
     // Looper
     juce::TextButton  loopRecButton    { "Loop" };
+    juce::Label       looperProgressLabel;
+    int               looperFlashCounter = 0;
 
     // Routing mode toggle
     juce::TextButton  routingModeButton { ">>" };
@@ -244,6 +257,9 @@ private:
     bool               toolbarLabelsVisible = false;
     juce::TextButton   toolbarExpandButton  { "..." };
 
+    // Help
+    juce::TextButton   helpButton  { "?" };
+
     // Setlist
     juce::TextButton  setlistButton    { "Setlist" };
 
@@ -251,6 +267,9 @@ private:
     juce::ToggleButton gateToggle      { "Gate" };
     juce::Slider       gateThreshSlider;
     juce::Label        gateThreshLabel;
+
+    // Signal chain view
+    SignalChainView    signalChainView;
 
     // Scenes row (8 scene buttons)
     juce::TextButton   sceneButtons[NUM_SCENES];
@@ -293,8 +312,12 @@ private:
     // Tuner panel (hidden until activated)
     TunerPanel tunerPanel;
 
+    // MIDI activity LED
+    juce::Label midiLedLabel;
+
     // Status bar
     juce::Label statusLabel;
+    juce::Label statusStateLabel;  // colored state flags
     juce::Label cpuLabel;
     juce::Label ramLabel;
 
@@ -326,13 +349,20 @@ private:
     enum MenuIDs
     {
         MenuNew = 1, MenuOpen, MenuSave, MenuSaveAs,
-        MenuPluginManager, MenuAsioSettings, MenuSetlist, MenuQuit,
+        MenuPluginManager, MenuAsioSettings, MenuSetlist, MenuMidiRules, MenuQuit,
         MenuLoadLoop, MenuLoopMode, MenuLiveMode, MenuEditUIColors,
-        MenuRecentBase = 1000  // IDs 1000-1009 for recent projects
+        MenuRecentBase = 1000,  // IDs 1000-1009 for recent projects
+        MenuMidiInBase = 2000,  // IDs 2000+ for MIDI input devices
+        MenuMidiOutBase = 3000  // IDs 3000+ for MIDI output devices
     };
 
     void showPluginManager();
     void showMetronomeSettings();
+    void showShortcutHelp();
+    void showMidiRulesEditor();
+    void autosave();
+    juce::File getAutosaveFile() const;
+    void checkAutosaveRecovery();
     void swapChannels (int fromIndex, int toIndex);
     int  dragSourceChannel = -1;
     void saveLastProjectPath();

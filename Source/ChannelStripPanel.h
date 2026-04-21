@@ -26,6 +26,9 @@ public:
     std::function<void()> onAddPluginClicked;
     std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed)> onPastePlugin;
 
+    juce::Array<PluginAppearanceState> getAppearances() const;
+    void setAppearances (const juce::Array<PluginAppearanceState>& appearances);
+
 private:
     struct SlotInfo
     {

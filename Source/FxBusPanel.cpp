@@ -299,6 +299,11 @@ void FxBusPanel::pushMeterLevels (float inL, float inR, float outL, float outR)
     meterOut.pushLevel (outL, outR);
 }
 
+void FxBusPanel::setMasterFaderDb (float db)
+{
+    masterFader.setValue (db, juce::dontSendNotification);
+}
+
 void FxBusPanel::sliderValueChanged (juce::Slider* s)
 {
     if (s == &masterFader)

@@ -18,6 +18,7 @@ public:
     void syncFromBus();
 
     void pushMeterLevels (float inL, float inR, float outL, float outR);
+    void setMasterFaderDb (float db);
 
     void paint   (juce::Graphics& g) override;
     void resized () override;

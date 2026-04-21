@@ -53,8 +53,28 @@ bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data)
     // ---- Input trim ----
     root->setAttribute ("inputTrimDb", data.inputTrimDb);
 
+    // ---- Gate ----
+    auto* gateEl = root->createNewChildElement ("Gate");
+    gateEl->setAttribute ("enabled",   data.gateEnabled ? 1 : 0);
+    gateEl->setAttribute ("threshDb",  data.gateThreshDb);
+    gateEl->setAttribute ("attackMs",  data.gateAttackMs);
+    gateEl->setAttribute ("holdMs",    data.gateHoldMs);
+    gateEl->setAttribute ("releaseMs", data.gateReleaseMs);
+
     // ---- FX Bus ----
     root->addChildElement (fxBusStateToXml (data.fxBusState));
+
+    // ---- Knob Colors ----
+    if (! data.knobColorMap.empty())
+    {
+        auto* colorsEl = root->createNewChildElement ("KnobColors");
+        for (const auto& [id, color] : data.knobColorMap)
+        {
+            auto* e = colorsEl->createNewChildElement ("Knob");
+            e->setAttribute ("id", id);
+            e->setAttribute ("color", color);
+        }
+    }
 
     return root->writeTo (file);
 }
@@ -134,9 +154,32 @@ bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data)
     // ---- Input trim ----
     data.inputTrimDb = (float) root->getDoubleAttribute ("inputTrimDb", 0.0);
 
+    // ---- Gate ----
+    if (auto* gateEl = root->getChildByName ("Gate"))
+    {
+        data.gateEnabled   = gateEl->getIntAttribute ("enabled", 0) != 0;
+        data.gateThreshDb  = (float) gateEl->getDoubleAttribute ("threshDb", -60.0);
+        data.gateAttackMs  = (float) gateEl->getDoubleAttribute ("attackMs", 5.0);
+        data.gateHoldMs    = (float) gateEl->getDoubleAttribute ("holdMs", 50.0);
+        data.gateReleaseMs = (float) gateEl->getDoubleAttribute ("releaseMs", 100.0);
+    }
+
     // ---- FX Bus ----
     if (auto* fxEl = root->getChildByName ("FxBus"))
         xmlToFxBusState (fxEl, data.fxBusState);
+
+    // ---- Knob Colors ----
+    data.knobColorMap.clear();
+    if (auto* colorsEl = root->getChildByName ("KnobColors"))
+    {
+        for (auto* e : colorsEl->getChildWithTagNameIterator ("Knob"))
+        {
+            auto id    = e->getStringAttribute ("id");
+            auto color = e->getStringAttribute ("color");
+            if (id.isNotEmpty() && color.isNotEmpty())
+                data.knobColorMap[id] = color;
+        }
+    }
 
     return true;
 }
@@ -173,6 +216,15 @@ juce::XmlElement* ProjectState::channelToXml (const ChannelState& ch, int index)
             plugEl->setAttribute ("state", b64);
         }
     }
+
+    for (const auto& pas : ch.pluginAppearances)
+    {
+        auto* appEl = el->createNewChildElement ("Appearance");
+        appEl->setAttribute ("pluginName", pas.pluginName);
+        appEl->setAttribute ("tint",       (int) pas.tint.getARGB());
+        appEl->setAttribute ("nickname",   pas.nickname);
+    }
+
     return el;
 }
 
@@ -201,6 +253,17 @@ bool ProjectState::xmlToChannel (const juce::XmlElement* el, ChannelState& ch)
         }
         ch.plugins.add (slot);
     }
+
+    ch.pluginAppearances.clear();
+    for (auto* appEl : el->getChildWithTagNameIterator ("Appearance"))
+    {
+        PluginAppearanceState pas;
+        pas.pluginName = appEl->getStringAttribute ("pluginName");
+        pas.tint       = juce::Colour ((juce::uint32) appEl->getIntAttribute ("tint", 0));
+        pas.nickname   = appEl->getStringAttribute ("nickname");
+        ch.pluginAppearances.add (pas);
+    }
+
     return true;
 }
 

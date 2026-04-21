@@ -434,6 +434,33 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
     });
 }
 
+juce::Array<PluginAppearanceState> ChannelStripPanel::getAppearances() const
+{
+    juce::Array<PluginAppearanceState> result;
+    for (const auto& [name, app] : pluginAppearance)
+    {
+        PluginAppearanceState pas;
+        pas.pluginName = name;
+        pas.tint       = app.tint;
+        pas.nickname   = app.nickname;
+        result.add (pas);
+    }
+    return result;
+}
+
+void ChannelStripPanel::setAppearances (const juce::Array<PluginAppearanceState>& appearances)
+{
+    pluginAppearance.clear();
+    for (const auto& pas : appearances)
+    {
+        PluginAppearance a;
+        a.tint     = pas.tint;
+        a.nickname = pas.nickname;
+        pluginAppearance[pas.pluginName] = a;
+    }
+    refresh();
+}
+
 void ChannelStripPanel::showNicknameDialog (int slotIndex)
 {
     if (slotIndex < 0 || slotIndex >= strip.getNumPlugins()) return;

@@ -24,15 +24,28 @@ class SceneManager
 public:
     SceneManager();
 
+    struct GlobalState
+    {
+        bool  gateEnabled   = false;
+        float gateThreshDb  = -60.0f;
+        float inputTrimDb   = 0.0f;
+        ProjectData::FxBusState fxBusState;
+    };
+
     //==========================================================================
-    // Capture current channel states into a scene slot
     void captureScene (int sceneIndex,
                        ChannelStrip** channels,
+                       const GlobalState& globals = {},
                        const juce::String& name = {});
 
-    /** Apply a scene to the live channel strips. */
-    bool applyScene   (int sceneIndex,
-                       ChannelStrip** channels);
+    struct ApplyResult
+    {
+        bool  success       = false;
+        GlobalState globals;
+    };
+
+    ApplyResult applyScene (int sceneIndex,
+                            ChannelStrip** channels);
 
     //==========================================================================
     // Scene metadata
@@ -40,6 +53,7 @@ public:
     juce::String    getSceneName (int index) const;
     void            setSceneName (int index, const juce::String& name);
     void            clearScene   (int index);
+    ChannelState    getChannelState (int sceneIndex, int channelIndex) const;
 
     int  pcBaseOffset = 4; // PC 4 = scene 0, PC 5 = scene 1, ...
 
@@ -54,6 +68,7 @@ private:
         bool         used = false;
         juce::String name;
         ChannelState channels[NUM_CHANNELS];
+        GlobalState  globals;
     };
 
     Scene scenes[NUM_SCENES];

@@ -74,6 +74,9 @@ bool FxBus::addPlugin (const juce::PluginDescription& desc,
             instance->setRateAndBufferSizeDetails (currentSampleRate, currentBlockSize);
             instance->prepareToPlay (currentSampleRate, currentBlockSize);
 
+            if (playHead != nullptr)
+                instance->setPlayHead (playHead);
+
             auto* entry       = new PluginEntry();
             entry->processor  = std::move (instance);
             entry->identifier = desc.createIdentifierString();

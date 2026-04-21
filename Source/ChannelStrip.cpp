@@ -20,6 +20,11 @@ void ChannelStrip::prepare (double sampleRate, int blockSize)
     currentSampleRate = sampleRate;
     currentBlockSize  = blockSize;
 
+    inputGainSmoothed.reset (sampleRate, 0.03);  // 30ms ramp
+    outputGainSmoothed.reset (sampleRate, 0.03);
+    inputGainSmoothed.setCurrentAndTargetValue (inputGainTarget.load());
+    outputGainSmoothed.setCurrentAndTargetValue (outputGainTarget.load());
+
     juce::ScopedLock sl (chainLock);
     for (auto* entry : pluginChain)
     {
@@ -66,6 +71,9 @@ bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
 
             instance->setRateAndBufferSizeDetails (currentSampleRate, currentBlockSize);
             instance->prepareToPlay (currentSampleRate, currentBlockSize);
+
+            if (playHead != nullptr)
+                instance->setPlayHead (playHead);
 
             auto* entry = new PluginEntry();
             entry->processor  = std::move (instance);
@@ -187,8 +195,21 @@ const ChannelStrip::PluginEntry& ChannelStrip::getPluginEntry (int chainIndex) c
 //==============================================================================
 void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
-    // Apply input gain
-    buffer.applyGain (inputGain.load());
+    // Apply smoothed input gain
+    inputGainSmoothed.setTargetValue (inputGainTarget.load());
+    if (inputGainSmoothed.isSmoothing())
+    {
+        for (int s = 0; s < buffer.getNumSamples(); ++s)
+        {
+            float g = inputGainSmoothed.getNextValue();
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                buffer.getWritePointer (ch)[s] *= g;
+        }
+    }
+    else
+    {
+        buffer.applyGain (inputGainSmoothed.getTargetValue());
+    }
 
     {
         juce::ScopedLock sl (chainLock);
@@ -215,8 +236,21 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
         }
     }
 
-    // Apply output gain
-    buffer.applyGain (outputGain.load());
+    // Apply smoothed output gain
+    outputGainSmoothed.setTargetValue (outputGainTarget.load());
+    if (outputGainSmoothed.isSmoothing())
+    {
+        for (int s = 0; s < buffer.getNumSamples(); ++s)
+        {
+            float g = outputGainSmoothed.getNextValue();
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                buffer.getWritePointer (ch)[s] *= g;
+        }
+    }
+    else
+    {
+        buffer.applyGain (outputGainSmoothed.getTargetValue());
+    }
 
     // Apply pan (equal-power)
     float p = pan.load();
@@ -236,16 +270,16 @@ void ChannelStrip::setActive (bool shouldBeActive)
     active = shouldBeActive;
 }
 
-void ChannelStrip::setInputGain  (float g) { inputGain.store  (g); }
-void ChannelStrip::setOutputGain (float g) { outputGain.store (g); }
+void ChannelStrip::setInputGain  (float g) { inputGainTarget.store (g); }
+void ChannelStrip::setOutputGain (float g) { outputGainTarget.store (g); }
 
 //==============================================================================
 ChannelState ChannelStrip::getState() const
 {
     ChannelState state;
     state.name        = name;
-    state.inputGain   = inputGain.load();
-    state.outputGain  = outputGain.load();
+    state.inputGain   = inputGainTarget.load();
+    state.outputGain  = outputGainTarget.load();
     state.pan         = pan.load();
 
     juce::ScopedLock sl (chainLock);

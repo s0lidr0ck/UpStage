@@ -149,3 +149,13 @@ double Looper::getPositionNormalised() const
     if (loopLength <= 0) return 0.0;
     return (double) readPos / (double) loopLength;
 }
+
+double Looper::getElapsedSeconds() const
+{
+    auto s = state.load();
+    if (s == State::Recording)
+        return (double) writePos / sampleRate;
+    if (loopLength > 0)
+        return (double) readPos / sampleRate;
+    return 0.0;
+}
