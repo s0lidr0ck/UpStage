@@ -1,0 +1,261 @@
+================================================================
+PATCH: MainComponent — Send/Return FX Bus integration
+================================================================
+Apply in order. All diffs are relative to the committed files.
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.h
+────────────────────────────────────────────────────────────────
+
+1. Add includes near the top (after existing includes):
+
+    #include "FxBus.h"
+    #include "FxBusPanel.h"
+
+2. In the private section, after the ChannelStrip declarations, add:
+
+    // FX Bus
+    std::unique_ptr<FxBus>      fxBus;
+    std::unique_ptr<FxBusPanel> fxBusPanel;
+
+3. Add a helper declaration in the private section:
+
+    void showAddPluginMenuForFxBus();
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  Constructor
+────────────────────────────────────────────────────────────────
+
+After the channel strip creation loop:
+
+    for (int i = 0; i < NUM_CHANNELS; ++i) { ... }
+
+Add:
+
+    // Create FX bus
+    fxBus      = std::make_unique<FxBus> (pluginFormatManager);
+    fxBusPanel = std::make_unique<FxBusPanel> (*fxBus);
+    fxBusPanel->onAddPluginClicked = [this] { showAddPluginMenuForFxBus(); };
+    addAndMakeVisible (*fxBusPanel);
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  prepareToPlay
+────────────────────────────────────────────────────────────────
+
+After the existing channel prepare loop:
+
+    for (auto& ch : channels)
+        ch->prepare (sr, blockSize);
+
+Add:
+
+    fxBus->prepare (sr, blockSize);
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  releaseResources
+────────────────────────────────────────────────────────────────
+
+After:
+
+    for (auto& ch : channels)
+        ch->releaseResources();
+
+Add:
+
+    fxBus->releaseResources();
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  getNextAudioBlock
+────────────────────────────────────────────────────────────────
+
+Currently the audio thread:
+  1. Builds `work` buffer
+  2. Runs the active channel through processBlock
+  3. Writes to output
+
+The FX bus needs a copy of each channel's processed audio BEFORE
+the active-channel-only guard. Because only one channel is active
+at a time (the others are silent), we build the send buffer for
+just the active channel post-process.
+
+Replace the "Active channel processing" block:
+
+    OLD:
+    // ---- Active channel processing ----
+    if (! outputMuted)
+        channels[activeChannel]->processBlock (work, midi);
+    else
+        work.clear();
+
+    NEW:
+    // ---- Active channel processing ----
+    // After processing, copy the output for the FX bus send.
+    // Other channels are silent (not active), so their send buffers are nullptr.
+    const juce::AudioBuffer<float>* sendBuffers[NUM_CHANNELS] = {
+        nullptr, nullptr, nullptr, nullptr
+    };
+    juce::AudioBuffer<float> sendCopy;   // storage for the active channel's copy
+
+    if (! outputMuted)
+    {
+        channels[activeChannel]->processBlock (work, midi);
+
+        // Copy post-process audio for the FX bus send
+        sendCopy.setSize (work.getNumChannels(), info.numSamples, false, false, true);
+        for (int ch = 0; ch < work.getNumChannels(); ++ch)
+            sendCopy.copyFrom (ch, 0, work, ch, 0, info.numSamples);
+        sendBuffers[activeChannel] = &sendCopy;
+    }
+    else
+    {
+        work.clear();
+    }
+
+    // ---- FX Bus ----
+    // Mix channel sends → FX chain → add wet output back into main buffer
+    fxBus->processBlock (work, sendBuffers, info.numSamples);
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  resized()
+────────────────────────────────────────────────────────────────
+
+At the very end of resized(), BEFORE the status bar placement:
+
+    OLD (last lines of resized):
+    // Channel strip area
+    int panelW = area.getWidth() / NUM_CHANNELS;
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        auto panel = area.removeFromLeft (panelW);
+        ...
+    }
+
+    // Status bar
+    statusLabel.setBounds (getLocalBounds().removeFromBottom (22).reduced (8, 2));
+
+    NEW (add FX bus panel between channel area and status bar):
+    // Channel strip area
+    int panelW = area.getWidth() / NUM_CHANNELS;
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        auto panel = area.removeFromLeft (panelW);
+        ...
+    }
+
+    // FX Bus panel — sits at the bottom, above the status bar
+    {
+        int fxH = fxBusPanel->getPreferredHeight();
+        fxBusPanel->setBounds (area.removeFromBottom (fxH));
+    }
+
+    // Status bar
+    statusLabel.setBounds (getLocalBounds().removeFromBottom (22).reduced (8, 2));
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  loadProjectData
+────────────────────────────────────────────────────────────────
+
+After loading channel states, add FX bus state restoration:
+
+    // Restore FX bus state — apply to the engine, then sync knobs from the engine
+    {
+        FxBus::State fbs;
+        for (int i = 0; i < 4; ++i) fbs.sendLevels[i] = data.fxBusState.sendLevels[i];
+        fbs.returnLevel = data.fxBusState.returnLevel;
+        fbs.bypassed    = data.fxBusState.bypassed;
+        fbs.plugins     = data.fxBusState.plugins;
+        fxBus->setState (fbs);
+    }
+    fxBusPanel->syncFromBus();   // updates knobs & bypass toggle from bus state
+
+    // Load FX bus plugins asynchronously
+    for (const auto& slot : data.fxBusState.plugins)
+    {
+        juce::PluginDescription desc;
+        if (auto* found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
+            desc = *found;
+        else
+        {
+            desc.pluginFormatName = "VST3";
+            desc.fileOrIdentifier = slot.pluginIdentifier;
+            desc.name             = slot.pluginName;
+        }
+
+        juce::MemoryBlock stateBlob = slot.stateData;
+        bool bypassed               = slot.isBypassed;
+        int  slotIdx                = data.fxBusState.plugins.indexOf (slot);
+
+        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
+        {
+            if (! ok) return;
+            if (stateBlob.getSize() > 0)
+                if (auto* proc = fxBus->getPlugin (slotIdx))
+                    proc->setStateInformation (stateBlob.getData(),
+                                               (int) stateBlob.getSize());
+            fxBus->setPluginBypassed (slotIdx, bypassed);
+            juce::MessageManager::callAsync ([this] { fxBusPanel->refresh(); });
+        });
+    }
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  collectProjectData
+────────────────────────────────────────────────────────────────
+
+At the end of collectProjectData(), before `return data;`:
+
+    data.fxBusState = fxBus->getState();
+
+────────────────────────────────────────────────────────────────
+FILE: Source/MainComponent.cpp  —  showAddPluginMenuForFxBus (new method)
+────────────────────────────────────────────────────────────────
+
+Add this new helper method (e.g. near the end of the file, after
+showAddPluginMenu):
+
+    void MainComponent::showAddPluginMenuForFxBus()
+    {
+        if (knownPluginList.getNumTypes() == 0)
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::AlertWindow::InfoIcon, "No Plugins",
+                "No plugins found. Use Settings > Scan for VST3 Plugins first.", "OK");
+            return;
+        }
+
+        juce::PopupMenu menu;
+        for (int i = 0; i < knownPluginList.getNumTypes(); ++i)
+            menu.addItem (i + 1, knownPluginList.getType (i)->name);
+
+        menu.showMenuAsync ({}, [this] (int result)
+        {
+            if (result <= 0 || result > knownPluginList.getNumTypes()) return;
+            auto desc = *knownPluginList.getType (result - 1);
+            fxBus->addPlugin (desc, [this] (bool ok)
+            {
+                if (! ok)
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon, "UpStage",
+                        "Failed to load FX plugin.", "OK");
+                juce::MessageManager::callAsync ([this] { fxBusPanel->refresh(); });
+                projectDirty = true;
+            });
+        });
+    }
+
+────────────────────────────────────────────────────────────────
+NOTE ON WINDOW HEIGHT
+────────────────────────────────────────────────────────────────
+
+FxBusPanel::getPreferredHeight() changes dynamically as plugins
+are added/removed and as the panel is collapsed/expanded.
+To keep the layout correct, call resized() from timerCallback
+(or simply rely on the refresh() → repaint() cascade that already
+triggers a layout update in JUCE when child bounds change).
+
+The simplest approach: in MainComponent::timerCallback(), after
+the level meter push loop, add:
+
+    // Re-layout if FX bus panel height has changed
+    static int lastFxBusH = 0;
+    int curFxBusH = fxBusPanel->getPreferredHeight();
+    if (curFxBusH != lastFxBusH) { lastFxBusH = curFxBusH; resized(); }

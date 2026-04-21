@@ -1,0 +1,38 @@
+# Build outputs
+Builds/VisualStudio2025/x64/
+Builds/VisualStudio2025/*.vcxproj.user
+Builds/VisualStudio2025/.vs/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+*.idb
+*.ipch
+*.tlog
+
+# JUCE library code (generated, can be regenerated from .jucer)
+JuceLibraryCode/
+
+# IDE
+.vs/
+*.suo
+*.user
+*.sdf
+*.opensdf
+*.db
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Claude
+.claude/
+
+# Plugin scan cache
+*.cache
+pluginList.xml
+pluginBlacklist.xml

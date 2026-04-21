@@ -1,0 +1,468 @@
+#include "ChannelStripPanel.h"
+
+//==============================================================================
+ChannelStripPanel::ChannelStripPanel (ChannelStrip& s)
+    : strip (s)
+{
+    refresh();
+}
+
+ChannelStripPanel::~ChannelStripPanel()
+{
+}
+
+//==============================================================================
+void ChannelStripPanel::rebuildSlots()
+{
+    int numPlugins = strip.getNumPlugins();
+    numSlots = juce::jmax (numPlugins, kMaxVisibleSlots);
+    numSlots = juce::jmin (numSlots, kMaxVisibleSlots);
+
+    for (int i = 0; i < kMaxVisibleSlots; ++i)
+    {
+        slots[i].index = i;
+        if (i < numPlugins)
+        {
+            auto* proc = strip.getPlugin (i);
+            slots[i].name = (proc != nullptr) ? proc->getName() : "(unknown)";
+            slots[i].bypassed = strip.isPluginBypassed (i);
+            slots[i].empty = false;
+
+            if (proc != nullptr)
+            {
+                auto it = pluginAppearance.find (proc->getName());
+                if (it != pluginAppearance.end())
+                {
+                    slots[i].tintColour = it->second.tint;
+                    slots[i].nickname = it->second.nickname;
+                }
+                else
+                {
+                    slots[i].tintColour = juce::Colour (0x00000000);
+                    slots[i].nickname = "";
+                }
+            }
+        }
+        else
+        {
+            slots[i].name = "";
+            slots[i].nickname = "";
+            slots[i].bypassed = false;
+            slots[i].empty = true;
+            slots[i].tintColour = juce::Colour (0x00000000);
+        }
+    }
+}
+
+void ChannelStripPanel::refresh()
+{
+    rebuildSlots();
+    repaint();
+}
+
+int ChannelStripPanel::getPreferredHeight() const
+{
+    return kMaxVisibleSlots * (kSlotHeight + kSlotPadding) + kSlotPadding;
+}
+
+//==============================================================================
+void ChannelStripPanel::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+
+    // Recessed panel background - warm dark
+    juce::ColourGradient panelBg (
+        juce::Colour (0xff1a1816), bounds.getCentreX(), bounds.getY(),
+        juce::Colour (0xff1c1a18), bounds.getCentreX(), bounds.getBottom(), false);
+    g.setGradientFill (panelBg);
+    g.fillRoundedRectangle (bounds, 3.0f);
+
+    // Inset bevel: dark top-left, light bottom-right
+    g.setColour (juce::Colour (0xff080706));
+    g.drawLine (bounds.getX(), bounds.getY(), bounds.getRight(), bounds.getY(), 1.0f);
+    g.drawLine (bounds.getX(), bounds.getY(), bounds.getX(), bounds.getBottom(), 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.035f));
+    g.drawLine (bounds.getRight() - 1.0f, bounds.getY() + 1.0f, bounds.getRight() - 1.0f, bounds.getBottom(), 1.0f);
+    g.drawLine (bounds.getX() + 1.0f, bounds.getBottom() - 1.0f, bounds.getRight(), bounds.getBottom() - 1.0f, 1.0f);
+
+    // Draw slots
+    for (int i = 0; i < kMaxVisibleSlots; ++i)
+    {
+        int sy = kSlotPadding + i * (kSlotHeight + kSlotPadding);
+        auto slotRect = juce::Rectangle<int> (4, sy, getWidth() - 8, kSlotHeight);
+
+        if (slots[i].empty)
+        {
+            // Empty slot
+            g.setColour (juce::Colour (0xff141414));
+            g.fillRoundedRectangle (slotRect.toFloat(), 3.0f);
+
+            g.setColour (juce::Colour (0xff2a2a2a));
+            g.drawRoundedRectangle (slotRect.toFloat(), 3.0f, 0.5f);
+
+            g.setColour (juce::Colour (0xff3a3a3a));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (9.0f)));
+            g.drawText ("Slot " + juce::String (i + 1), slotRect, juce::Justification::centred);
+        }
+        else
+        {
+            // Filled slot
+            auto drawRect = slotRect;
+
+            if (slots[i].tintColour.getAlpha() > 0)
+            {
+                auto tinted = slots[i].bypassed ? slots[i].tintColour.withMultipliedBrightness (0.3f)
+                                                : slots[i].tintColour.withMultipliedBrightness (0.5f);
+                g.setColour (tinted);
+            }
+            else
+            {
+                g.setColour (juce::Colour (0xff222222));
+            }
+            g.fillRoundedRectangle (drawRect.toFloat(), 3.0f);
+
+            // Bypass dot
+            auto dotArea = drawRect.removeFromLeft (14);
+            auto dotCentre = dotArea.getCentre().toFloat();
+            g.setColour (slots[i].bypassed ? juce::Colour (0xff555555) : juce::Colour (0xff27ae60));
+            g.fillEllipse (dotCentre.x - 3.0f, dotCentre.y - 3.0f, 6.0f, 6.0f);
+
+            // Plugin name (or nickname)
+            juce::String displayName = slots[i].nickname.isNotEmpty() ? slots[i].nickname : slots[i].name;
+            g.setColour (slots[i].bypassed ? juce::Colour (0xff666666) : juce::Colour (0xffcccccc));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+            g.drawText (displayName, drawRect.reduced (3, 0), juce::Justification::centredLeft, true);
+        }
+    }
+
+    // Draw drag indicator
+    if (dragging && dragTargetSlot >= 0 && dragSourceSlot >= 0 && dragTargetSlot != dragSourceSlot)
+    {
+        int indicatorY = kSlotPadding + dragTargetSlot * (kSlotHeight + kSlotPadding);
+        if (dragTargetSlot > dragSourceSlot)
+            indicatorY += kSlotHeight;
+
+        g.setColour (juce::Colour (0xff4a90e2));
+        g.fillRect (6, indicatorY - 1, getWidth() - 12, 3);
+
+        // Small triangles on the ends
+        juce::Path arrow;
+        arrow.addTriangle (4.0f, (float)indicatorY - 4.0f,
+                           4.0f, (float)indicatorY + 4.0f,
+                           10.0f, (float)indicatorY);
+        g.fillPath (arrow);
+    }
+
+    // Dim the source slot while dragging
+    if (dragging && dragSourceSlot >= 0)
+    {
+        int sy = kSlotPadding + dragSourceSlot * (kSlotHeight + kSlotPadding);
+        auto sourceRect = juce::Rectangle<int> (4, sy, getWidth() - 8, kSlotHeight);
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.fillRoundedRectangle (sourceRect.toFloat(), 3.0f);
+    }
+}
+
+//==============================================================================
+void ChannelStripPanel::resized()
+{
+    repaint();
+}
+
+//==============================================================================
+int ChannelStripPanel::getSlotAt (int y) const
+{
+    for (int i = 0; i < kMaxVisibleSlots; ++i)
+    {
+        int sy = kSlotPadding + i * (kSlotHeight + kSlotPadding);
+        if (y >= sy && y < sy + kSlotHeight)
+            return i;
+    }
+    return -1;
+}
+
+void ChannelStripPanel::mouseDown (const juce::MouseEvent& e)
+{
+    doubleClicked = false;
+
+    int slotIndex = getSlotAt (e.y);
+    if (slotIndex < 0) return;
+
+    if (e.mods.isRightButtonDown())
+    {
+        showSlotContextMenu (slotIndex);
+        return;
+    }
+
+    if (slots[slotIndex].empty)
+    {
+        if (onAddPluginClicked) onAddPluginClicked();
+    }
+    else
+    {
+        dragSourceSlot = slotIndex;
+        dragging = false;
+    }
+}
+
+void ChannelStripPanel::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    int slotIndex = getSlotAt (e.y);
+    if (slotIndex < 0 || slots[slotIndex].empty) return;
+
+    doubleClicked = true;
+    strip.openPluginEditor (slotIndex);
+}
+
+void ChannelStripPanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragSourceSlot < 0 || slots[dragSourceSlot].empty) return;
+
+    if (! dragging && e.getDistanceFromDragStart() > 5)
+        dragging = true;
+
+    if (dragging)
+    {
+        int target = getSlotAt (e.y);
+        if (target != dragTargetSlot)
+        {
+            dragTargetSlot = target;
+            repaint();
+        }
+    }
+}
+
+void ChannelStripPanel::mouseUp (const juce::MouseEvent& e)
+{
+    if (dragging && dragSourceSlot >= 0 && dragTargetSlot >= 0
+        && dragSourceSlot != dragTargetSlot
+        && dragSourceSlot < strip.getNumPlugins())
+    {
+        // Move the plugin to the target slot
+        int from = dragSourceSlot;
+        int to = dragTargetSlot;
+
+        // Clamp target to valid plugin range (can't move past last plugin)
+        to = juce::jmin (to, strip.getNumPlugins() - 1);
+
+        if (from != to && to >= 0)
+        {
+            // Move step by step toward target
+            int step = (to > from) ? 1 : -1;
+            for (int pos = from; pos != to; pos += step)
+                strip.movePlugin (pos, pos + step);
+
+            refresh();
+        }
+    }
+    else if (! dragging && ! doubleClicked && dragSourceSlot >= 0 && ! slots[dragSourceSlot].empty)
+    {
+        bool bp = strip.isPluginBypassed (dragSourceSlot);
+        strip.setPluginBypassed (dragSourceSlot, ! bp);
+        refresh();
+    }
+
+    dragSourceSlot = -1;
+    dragTargetSlot = -1;
+    dragging = false;
+    repaint();
+}
+
+void ChannelStripPanel::showSlotContextMenu (int slotIndex)
+{
+    juce::PopupMenu menu;
+    bool hasPlugin = slotIndex >= 0 && slotIndex < strip.getNumPlugins() && ! slots[slotIndex].empty;
+    auto& clipboard = getClipboard();
+    bool clipboardHasData = clipboard.pluginIdentifier.isNotEmpty();
+
+    if (hasPlugin)
+    {
+        menu.addItem (1, "Open Editor");
+        menu.addItem (6, "Nickname...");
+        menu.addSeparator();
+
+        bool bypassed = strip.isPluginBypassed (slotIndex);
+        menu.addItem (2, bypassed ? "Enable" : "Bypass");
+        menu.addSeparator();
+
+        menu.addItem (10, "Copy");
+        if (clipboardHasData)
+        {
+            auto* proc = strip.getPlugin (slotIndex);
+            bool samePlugin = proc != nullptr && clipboard.pluginIdentifier == slots[slotIndex].name;
+            menu.addItem (11, samePlugin ? "Paste Settings" : "Paste (Replace)");
+        }
+        menu.addSeparator();
+
+        juce::PopupMenu tintMenu;
+        tintMenu.addItem (20, "None");
+        tintMenu.addItem (21, "Red");
+        tintMenu.addItem (22, "Green");
+        tintMenu.addItem (23, "Blue");
+        tintMenu.addItem (24, "Purple");
+        tintMenu.addItem (25, "Orange");
+        tintMenu.addItem (26, "Teal");
+        tintMenu.addItem (27, "Yellow");
+        menu.addSubMenu ("Tint Colour", tintMenu);
+
+        menu.addSeparator();
+        menu.addItem (3, "Move Up", slotIndex > 0);
+        menu.addItem (4, "Move Down", slotIndex < strip.getNumPlugins() - 1);
+        menu.addSeparator();
+        menu.addItem (5, "Remove");
+    }
+    else
+    {
+        if (clipboardHasData)
+            menu.addItem (11, "Paste");
+        menu.addItem (12, "Add Plugin...");
+    }
+
+    menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
+    {
+        if (result <= 0) return;
+
+        auto storeAppearance = [this, slotIndex] ()
+        {
+            if (slotIndex >= strip.getNumPlugins()) return;
+            auto* proc = strip.getPlugin (slotIndex);
+            if (proc != nullptr)
+            {
+                auto& a = pluginAppearance[proc->getName()];
+                a.tint     = slots[slotIndex].tintColour;
+                a.nickname = slots[slotIndex].nickname;
+            }
+        };
+
+        switch (result)
+        {
+            case 1: strip.openPluginEditor (slotIndex); break;
+            case 2:
+            {
+                bool bp = strip.isPluginBypassed (slotIndex);
+                strip.setPluginBypassed (slotIndex, ! bp);
+                refresh();
+                break;
+            }
+            case 3:
+                strip.movePlugin (slotIndex, slotIndex - 1);
+                refresh();
+                break;
+            case 4:
+                strip.movePlugin (slotIndex, slotIndex + 1);
+                refresh();
+                break;
+            case 5:
+                strip.removePlugin (slotIndex);
+                refresh();
+                break;
+            case 6:
+                showNicknameDialog (slotIndex);
+                break;
+
+            case 10:
+            {
+                auto* proc = strip.getPlugin (slotIndex);
+                if (proc != nullptr)
+                {
+                    auto& cb = getClipboard();
+                    cb.pluginIdentifier = slots[slotIndex].name;
+                    cb.pluginName = proc->getName();
+                    cb.stateData.reset();
+                    proc->getStateInformation (cb.stateData);
+                    cb.bypassed = strip.isPluginBypassed (slotIndex);
+
+                    auto& entry = strip.getPluginEntry (slotIndex);
+                    cb.pluginIdentifier = entry.identifier;
+                }
+                break;
+            }
+
+            case 11:
+            {
+                auto& cb = getClipboard();
+                if (hasPlugin)
+                {
+                    auto& entry = strip.getPluginEntry (slotIndex);
+                    if (entry.identifier == cb.pluginIdentifier)
+                    {
+                        auto* proc = strip.getPlugin (slotIndex);
+                        if (proc != nullptr && cb.stateData.getSize() > 0)
+                            proc->setStateInformation (cb.stateData.getData(), (int) cb.stateData.getSize());
+                    }
+                    else
+                    {
+                        if (onPastePlugin)
+                            onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                    }
+                }
+                else
+                {
+                    if (onPastePlugin)
+                        onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                }
+                refresh();
+                break;
+            }
+
+            case 12:
+                if (onAddPluginClicked) onAddPluginClicked();
+                break;
+
+            case 20: case 21: case 22: case 23: case 24: case 25: case 26: case 27:
+            {
+                juce::Colour tint;
+                switch (result)
+                {
+                    case 20: tint = juce::Colour (0x00000000); break;
+                    case 21: tint = juce::Colour (0xffcc3333); break;
+                    case 22: tint = juce::Colour (0xff33cc33); break;
+                    case 23: tint = juce::Colour (0xff3366cc); break;
+                    case 24: tint = juce::Colour (0xff9933cc); break;
+                    case 25: tint = juce::Colour (0xffcc8833); break;
+                    case 26: tint = juce::Colour (0xff33ccaa); break;
+                    case 27: tint = juce::Colour (0xffcccc33); break;
+                }
+
+                slots[slotIndex].tintColour = tint;
+                storeAppearance();
+                repaint();
+                break;
+            }
+            default: break;
+        }
+    });
+}
+
+void ChannelStripPanel::showNicknameDialog (int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= strip.getNumPlugins()) return;
+
+    auto* aw = new juce::AlertWindow ("Plugin Nickname",
+                                       "Enter a display name for this plugin.\nLeave blank to use the original name.",
+                                       juce::AlertWindow::NoIcon);
+
+    aw->addTextEditor ("nickname", slots[slotIndex].nickname, "Nickname:");
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, slotIndex, aw] (int result)
+        {
+            if (result == 1 && slotIndex < strip.getNumPlugins())
+            {
+                auto nick = aw->getTextEditorContents ("nickname").trim();
+                slots[slotIndex].nickname = nick;
+
+                auto* proc = strip.getPlugin (slotIndex);
+                if (proc != nullptr)
+                {
+                    auto& a = pluginAppearance[proc->getName()];
+                    a.nickname = nick;
+                    a.tint = slots[slotIndex].tintColour;
+                }
+                repaint();
+            }
+            delete aw;
+        }), true);
+}

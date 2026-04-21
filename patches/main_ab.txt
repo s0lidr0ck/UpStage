@@ -1,0 +1,276 @@
+================================================================================
+  Feature 5: A/B Channel Hotkey — patch instructions for MainComponent
+================================================================================
+
+Apply all of the blocks below in order.  Every diff shows the EXACT existing
+text to find (--- FIND ---) and the replacement (--- REPLACE ---).
+
+The three new buttons live next to the channel-tab row and let the performer
+instantly A/B compare two channels without touching the tab strip.
+
+PC 124 → recall A channel
+PC 125 → recall B channel  (both PC numbers are configurable via the two
+         static constexpr ints documented below)
+
+================================================================================
+BLOCK 1 — MainComponent.h  — new member variables
+================================================================================
+
+Add AFTER the existing channel-tabs block (just before the per-channel members):
+
+--- FIND (in MainComponent.h private section, just after channelButtons[]) ---
+
+    // Per-channel: level meter + add plugin button + plugin list
+
+--- REPLACE ---
+
+    // ---- A/B Channel compare -------------------------------------------- //
+    // Two channels are bookmarked as "A" and "B".
+    // abToggleButton flips between them instantly (performance use).
+    // PC 124 recalls A; PC 125 recalls B (see AB_PC_A / AB_PC_B below).
+
+    int          abChannelA    = 0;        // bookmarked "A" channel index
+    int          abChannelB    = 1;        // bookmarked "B" channel index
+    bool         abIsShowingA  = true;     // which side is currently live
+
+    juce::TextButton setAButton    { "Set A" };
+    juce::TextButton setBButton    { "Set B" };
+    juce::TextButton abToggleButton { "A/B → B" };  // label updated dynamically
+
+    /** MIDI PC number that instantly recalls the A channel. */
+    static constexpr int AB_PC_A = 124;
+    /** MIDI PC number that instantly recalls the B channel. */
+    static constexpr int AB_PC_B = 125;
+
+    // Per-channel: level meter + add plugin button + plugin list
+
+================================================================================
+BLOCK 2 — MainComponent.cpp  — constructor: register & add buttons
+================================================================================
+
+--- FIND (in the constructor, just after the channel-tabs block) ---
+
+    // Channel tabs + per-channel UI
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        channelButtons[i].setButtonText ("Ch " + juce::String (i + 1));
+        channelButtons[i].addListener (this);
+        addAndMakeVisible (channelButtons[i]);
+
+--- REPLACE ---
+
+    // Channel tabs + per-channel UI
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        channelButtons[i].setButtonText ("Ch " + juce::String (i + 1));
+        channelButtons[i].addListener (this);
+        addAndMakeVisible (channelButtons[i]);
+
+    // A/B compare buttons
+    setAButton    .addListener (this);
+    setBButton    .addListener (this);
+    abToggleButton.addListener (this);
+    addAndMakeVisible (setAButton);
+    addAndMakeVisible (setBButton);
+    addAndMakeVisible (abToggleButton);
+
+NOTE: The closing brace of the for-loop is still there; only the additions
+above are inserted after the loop, before the next section.  Keep the existing
+structure intact.
+
+================================================================================
+BLOCK 3 — MainComponent.cpp  — resized(): lay out the three new buttons
+================================================================================
+
+--- FIND (in resized(), the channel-tabs section) ---
+
+    // Channel tabs
+    auto tabRow = area.removeFromTop (38);
+    int tabW = tabRow.getWidth() / NUM_CHANNELS;
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+        channelButtons[i].setBounds (tabRow.removeFromLeft (tabW));
+
+--- REPLACE ---
+
+    // Channel tabs + A/B buttons
+    auto tabRow = area.removeFromTop (38);
+
+    // Reserve space on the right of the tab row for the three A/B buttons:
+    //   [Set A] [Set B] [A/B → B]
+    // Each is 54 px wide with 2 px gaps; they sit flush right.
+    const int abBtnW   = 54;
+    const int abBtnGap = 2;
+    const int abTotalW = abBtnW * 3 + abBtnGap * 2;
+
+    auto abArea = tabRow.removeFromRight (abTotalW).reduced (0, 4);
+    setAButton    .setBounds (abArea.removeFromLeft (abBtnW)); abArea.removeFromLeft (abBtnGap);
+    setBButton    .setBounds (abArea.removeFromLeft (abBtnW)); abArea.removeFromLeft (abBtnGap);
+    abToggleButton.setBounds (abArea.removeFromLeft (abBtnW));
+
+    // Remaining space split evenly across NUM_CHANNELS channel tabs.
+    int tabW = tabRow.getWidth() / NUM_CHANNELS;
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+        channelButtons[i].setBounds (tabRow.removeFromLeft (tabW));
+
+================================================================================
+BLOCK 4 — MainComponent.cpp  — buttonClicked(): handle the three new buttons
+================================================================================
+
+Add the following block INSIDE buttonClicked(), just before the channel-tab
+loop (i.e. before "for (int i = 0; i < NUM_CHANNELS; ++i) { if (b == &channelButtons[i])"):
+
+--- FIND ---
+
+    // Channel tabs
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        if (b == &channelButtons[i])   { setActiveChannel (i); return; }
+
+--- REPLACE ---
+
+    // ---- A/B compare -------------------------------------------------------
+    else if (b == &setAButton)
+    {
+        // Bookmark the current active channel as "A".
+        abChannelA = activeChannel;
+        abIsShowingA = true;
+        updateChannelButtonStates();   // refresh highlight
+    }
+    else if (b == &setBButton)
+    {
+        // Bookmark the current active channel as "B".
+        abChannelB = activeChannel;
+        abIsShowingA = false;
+        updateChannelButtonStates();
+    }
+    else if (b == &abToggleButton)
+    {
+        // Flip between A and B channels.
+        if (abIsShowingA)
+        {
+            setActiveChannel (abChannelB);
+            abIsShowingA = false;
+        }
+        else
+        {
+            setActiveChannel (abChannelA);
+            abIsShowingA = true;
+        }
+        // Label updates happen inside updateChannelButtonStates().
+    }
+
+    // Channel tabs
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        if (b == &channelButtons[i])   { setActiveChannel (i); return; }
+
+================================================================================
+BLOCK 5 — MainComponent.cpp  — getNextAudioBlock(): MIDI PC 124 / 125
+================================================================================
+
+--- FIND (inside the PC dispatch lambda in getNextAudioBlock) ---
+
+                else if (pc == setlistManager.previousPCNumber)
+                {
+                    setlistManager.previous();
+                }
+                else if (pc == setlistManager.advancePCNumber)
+                {
+                    setlistManager.advance();
+                }
+
+--- REPLACE ---
+
+                else if (pc == setlistManager.previousPCNumber)
+                {
+                    setlistManager.previous();
+                }
+                else if (pc == setlistManager.advancePCNumber)
+                {
+                    setlistManager.advance();
+                }
+                else if (pc == AB_PC_A)
+                {
+                    // MIDI recall: jump straight to the bookmarked A channel.
+                    setActiveChannel (abChannelA);
+                    abIsShowingA = true;
+                    updateChannelButtonStates();
+                }
+                else if (pc == AB_PC_B)
+                {
+                    // MIDI recall: jump straight to the bookmarked B channel.
+                    setActiveChannel (abChannelB);
+                    abIsShowingA = false;
+                    updateChannelButtonStates();
+                }
+
+================================================================================
+BLOCK 6 — MainComponent.cpp  — updateChannelButtonStates(): add A/B highlights
+================================================================================
+
+--- FIND ---
+
+void MainComponent::updateChannelButtonStates()
+{
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        bool active = (i == activeChannel);
+        channelButtons[i].setColour (juce::TextButton::buttonColourId,
+            active ? juce::Colour (0xff4040a0) : juce::Colour (0xff2a2a4a));
+        channelButtons[i].setColour (juce::TextButton::textColourOffId,
+            active ? juce::Colours::white : juce::Colours::lightgrey);
+    }
+    repaint();
+}
+
+--- REPLACE ---
+
+void MainComponent::updateChannelButtonStates()
+{
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        const bool isActive = (i == activeChannel);
+        const bool isAbA    = (i == abChannelA);
+        const bool isAbB    = (i == abChannelB);
+
+        // Active channel: bright blue.
+        // A bookmark but not active: dim amber tint.
+        // B bookmark but not active: dim teal tint.
+        // Default: dark background.
+        juce::Colour bg;
+        if (isActive)      bg = juce::Colour (0xff4040a0);          // active
+        else if (isAbA)    bg = juce::Colour (0xff7a5a10);          // A bookmarked
+        else if (isAbB)    bg = juce::Colour (0xff10607a);          // B bookmarked
+        else               bg = juce::Colour (0xff2a2a4a);          // idle
+
+        channelButtons[i].setColour (juce::TextButton::buttonColourId, bg);
+        channelButtons[i].setColour (juce::TextButton::textColourOffId,
+            isActive ? juce::Colours::white : juce::Colours::lightgrey);
+    }
+
+    // Update the toggle button label to show which side is currently live
+    // and which side pressing it will jump to.
+    abToggleButton.setButtonText (abIsShowingA ? "A/B \xe2\x86\x92 B"   // → B
+                                               : "A/B \xe2\x86\x92 A"); // → A
+
+    // Highlight the toggle button when actively showing B (non-default side).
+    abToggleButton.setColour (juce::TextButton::buttonColourId,
+        abIsShowingA ? juce::Colour (0xff2a2a4a) : juce::Colour (0xff204060));
+
+    repaint();
+}
+
+================================================================================
+END OF PATCH
+================================================================================
+
+Summary of changes:
+  MainComponent.h  — 6 new member variables, 2 static constexpr PC numbers
+  MainComponent.cpp constructor — 3 button registrations + addAndMakeVisible
+  MainComponent.cpp resized()   — A/B buttons laid out right of channel tab row
+  MainComponent.cpp buttonClicked() — Set A / Set B / A/B toggle logic
+  MainComponent.cpp getNextAudioBlock() — PC 124 / PC 125 MIDI dispatch
+  MainComponent.cpp updateChannelButtonStates() — A/B highlights + toggle label
+
+No new files are required.  All changes are additive and localised to the two
+MainComponent files.

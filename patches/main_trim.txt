@@ -1,0 +1,186 @@
+========================================================================
+MainComponent – Input Trim + ChannelStripPanel Integration patch
+Generated for: /work/upstage/Source/MainComponent.{h,cpp}
+========================================================================
+
+Overview
+--------
+Three changes are needed in MainComponent:
+
+  A. Add the inputTrimSlider + label (Feature 3)
+  B. Wire trim into getNextAudioBlock() (Feature 3)
+  C. Integrate ChannelStripPanel in place of pluginListBoxes (Features 1+2)
+
+
+════════════════════════════════════════════════════════════════════════
+A. MainComponent.h  — member additions
+════════════════════════════════════════════════════════════════════════
+
+1. Add the following include near the top (after the existing includes):
+
+    #include "ChannelStripPanel.h"
+
+2. In the "UI" private section, REPLACE the line:
+       juce::ListBox  pluginListBoxes[NUM_CHANNELS];
+   WITH:
+       std::unique_ptr<ChannelStripPanel> channelStripPanels[NUM_CHANNELS];
+
+3. Still in the "UI" private section, add after `gateThreshLabel`:
+
+    // Input trim
+    juce::Slider  inputTrimSlider;
+    juce::Label   inputTrimLabel;
+
+
+════════════════════════════════════════════════════════════════════════
+B. MainComponent.cpp — constructor additions
+════════════════════════════════════════════════════════════════════════
+
+Inside MainComponent::MainComponent(), after the existing noise-gate
+slider setup and before `setSize(...)`:
+
+    //----------------------------------------------------------------------
+    // Input trim slider
+    inputTrimSlider.setRange (-24.0, 24.0, 0.1);
+    inputTrimSlider.setValue (0.0, juce::dontSendNotification);
+    inputTrimSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    inputTrimSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 20);
+    inputTrimSlider.setTextValueSuffix (" dB");
+    inputTrimSlider.setTooltip ("Input gain trim applied before the noise gate.\n"
+                                "Range: -24 dB to +24 dB.  Right-click for MIDI Learn.");
+    inputTrimSlider.onValueChange = [this]
+    {
+        // Mark project dirty so the user is prompted to save
+        projectDirty = true;
+    };
+    addAndMakeVisible (inputTrimSlider);
+
+    inputTrimLabel.setText ("Trim", juce::dontSendNotification);
+    inputTrimLabel.setFont (juce::Font (12.0f));
+    inputTrimLabel.attachToComponent (&inputTrimSlider, true);
+    addAndMakeVisible (inputTrimLabel);
+
+    // Register trim with MidiLearnManager (-24 dB … +24 dB range)
+    midiLearnManager.registerParameter ("inputTrim", -24.0f, 24.0f);
+
+    //----------------------------------------------------------------------
+    // ChannelStripPanels (replace pluginListBoxes)
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        channelStripPanels[i] = std::make_unique<ChannelStripPanel> (*channels[i]);
+        addAndMakeVisible (*channelStripPanels[i]);
+    }
+
+
+════════════════════════════════════════════════════════════════════════
+C. MainComponent.cpp — getNextAudioBlock() modification
+════════════════════════════════════════════════════════════════════════
+
+At the top of getNextAudioBlock(), BEFORE the noise gate is applied and
+AFTER the InputRouter fills the buffer, insert:
+
+    // --- Input Trim ---
+    // Convert the slider's dB value to a linear gain and scale the buffer.
+    {
+        const float trimGain =
+            juce::Decibels::decibelsToGain (
+                static_cast<float> (inputTrimSlider.getValue()));
+        bufferToFill.buffer->applyGain (bufferToFill.startSample,
+                                        bufferToFill.numSamples,
+                                        trimGain);
+    }
+    // ------------------
+
+The exact insertion point should be immediately after:
+    inputRouter.fillBuffer (*bufferToFill.buffer, ...);
+and BEFORE:
+    noiseGate.process (...);
+
+If there is a muted-output early-return path (tuner / outputMuted flag),
+make sure the trim is applied BEFORE that path exits, or apply it to the
+dry signal only — depending on whether trim should affect the tuner feed
+(recommended: apply trim BEFORE tuner so the tuner sees the trimmed signal).
+
+
+════════════════════════════════════════════════════════════════════════
+D. MainComponent.cpp — resized() modification
+════════════════════════════════════════════════════════════════════════
+
+In resized(), where pluginListBoxes[i].setBounds(...) is called, replace
+each occurrence with:
+
+    channelStripPanels[i]->setBounds ( <same rectangle> );
+
+Also add the trim slider to the transport/input row layout.  Suggested
+placement: immediately to the right of the gate threshold slider.
+
+Example (adjust x/y/w/h to match your existing layout grid):
+
+    // Trim slider — add after gateThreshSlider layout
+    const int trimLabelW = 32;  // "Trim" label width (attached, so subtract)
+    inputTrimSlider.setBounds (gateThreshSlider.getRight() + 8 + trimLabelW,
+                               gateThreshSlider.getY(),
+                               120,
+                               gateThreshSlider.getHeight());
+    // (Label is attached to the slider via attachToComponent, no separate setBounds)
+
+
+════════════════════════════════════════════════════════════════════════
+E. MainComponent.cpp — collectProjectData() / loadProjectData()
+════════════════════════════════════════════════════════════════════════
+
+In collectProjectData():
+    data.inputTrimDb = static_cast<float> (inputTrimSlider.getValue());
+
+In loadProjectData():
+    inputTrimSlider.setValue (data.inputTrimDb, juce::dontSendNotification);
+
+
+════════════════════════════════════════════════════════════════════════
+F. MainComponent.cpp — midiLearnParameterChanged()
+════════════════════════════════════════════════════════════════════════
+
+In the midiLearnParameterChanged() handler, add a new case:
+
+    if (paramID == "inputTrim")
+    {
+        // value arrives normalised 0–1; map back to -24…+24 dB
+        const float db = juce::jmap (value, 0.0f, 1.0f, -24.0f, 24.0f);
+        inputTrimSlider.setValue (db, juce::sendNotification);
+    }
+
+
+════════════════════════════════════════════════════════════════════════
+G. ProjectState.cpp — XML serialisation
+════════════════════════════════════════════════════════════════════════
+
+In saveToFile() (or wherever ProjectData fields are written to XML):
+
+    root->setAttribute ("inputTrimDb", data.inputTrimDb);
+
+In loadFromFile() (or wherever ProjectData fields are read from XML):
+
+    data.inputTrimDb = (float) el->getDoubleAttribute ("inputTrimDb", 0.0);
+
+
+════════════════════════════════════════════════════════════════════════
+H. showAddPluginMenu() callback (refresh panel after add)
+════════════════════════════════════════════════════════════════════════
+
+After calling channels[i]->addPlugin(...), in the success callback,
+refresh the corresponding ChannelStripPanel so the new row appears:
+
+    channels[channelIndex]->addPlugin (desc, [this, channelIndex] (bool ok)
+    {
+        if (ok)
+        {
+            juce::MessageManager::callAsync ([this, channelIndex]
+            {
+                channelStripPanels[channelIndex]->refresh();
+            });
+        }
+    });
+
+========================================================================
+END OF PATCH DOCUMENT
+========================================================================

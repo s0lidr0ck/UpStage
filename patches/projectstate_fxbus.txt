@@ -1,0 +1,186 @@
+================================================================
+PATCH: ProjectState / ProjectData — FxBus::State serialisation
+================================================================
+Apply in order.
+
+────────────────────────────────────────────────────────────────
+FILE: Source/ProjectState.h
+────────────────────────────────────────────────────────────────
+
+1. Add include at the top (FxBus is defined in FxBus.h; we only
+   need FxBus::State here, so forward-declare or include):
+
+    #include "FxBus.h"
+
+   NOTE: FxBus.h itself already includes ProjectState.h for
+   PluginSlotState. To break the include cycle, either:
+
+   Option A (preferred) — Move PluginSlotState out of ProjectState.h
+   into its own header (e.g. PluginSlotState.h) and include that from
+   both ProjectState.h and FxBus.h:
+
+       // PluginSlotState.h  (new file)
+       #pragma once
+       #include <JuceHeader.h>
+       struct PluginSlotState { ... };   // move definition here
+
+   Option B — Forward-declare FxBus::State in ProjectState.h:
+
+       struct FxBusState   // mirror of FxBus::State — keep in sync
+       {
+           float sendLevels[4] = {0,0,0,0};
+           float returnLevel   = 0.75f;
+           bool  bypassed      = false;
+           juce::Array<PluginSlotState> plugins;
+       };
+
+   Option C (simplest for now) — Define fxBusState inline in
+   ProjectData using primitive types mirroring FxBus::State, and
+   convert at the call sites in MainComponent.
+
+   The patch below uses Option B (embedded struct in ProjectData,
+   no circular include):
+
+2. Inside ProjectData, add a field after the existing members:
+
+    OLD:
+        // Scenes and MIDI learn are saved/loaded via SceneManager/MidiLearnManager
+        // and stored in the same XML file as child elements.
+    };
+
+    NEW (add before the closing brace):
+        // FX Bus
+        struct FxBusState
+        {
+            float sendLevels[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            float returnLevel   = 0.75f;
+            bool  bypassed      = false;
+            juce::Array<PluginSlotState> plugins;
+        };
+        FxBusState fxBusState;
+    };
+
+3. In ProjectState (the class), add private helpers:
+
+    juce::XmlElement* fxBusStateToXml (const ProjectData::FxBusState& state);
+    bool              xmlToFxBusState  (const juce::XmlElement* el,
+                                        ProjectData::FxBusState& state);
+
+────────────────────────────────────────────────────────────────
+FILE: Source/ProjectState.cpp  —  saveToFile
+────────────────────────────────────────────────────────────────
+
+After writing the Channels element (before `return root->writeTo(file)`):
+
+    // ---- FX Bus ----
+    root->addChildElement (fxBusStateToXml (data.fxBusState));
+
+────────────────────────────────────────────────────────────────
+FILE: Source/ProjectState.cpp  —  loadFromFile
+────────────────────────────────────────────────────────────────
+
+After loading the Channels element:
+
+    // ---- FX Bus ----
+    if (auto* fxEl = root->getChildByName ("FxBus"))
+        xmlToFxBusState (fxEl, data.fxBusState);
+
+────────────────────────────────────────────────────────────────
+FILE: Source/ProjectState.cpp  —  new helper implementations
+────────────────────────────────────────────────────────────────
+
+Add at the end of the file:
+
+    //==============================================================================
+    // FX Bus serialisation helpers
+    //==============================================================================
+
+    juce::XmlElement* ProjectState::fxBusStateToXml (const ProjectData::FxBusState& s)
+    {
+        auto* el = new juce::XmlElement ("FxBus");
+        el->setAttribute ("bypassed",    s.bypassed    ? 1 : 0);
+        el->setAttribute ("returnLevel", s.returnLevel);
+        for (int i = 0; i < 4; ++i)
+            el->setAttribute ("send" + juce::String (i), s.sendLevels[i]);
+
+        for (const auto& slot : s.plugins)
+        {
+            auto* plugEl = el->createNewChildElement ("Plugin");
+            plugEl->setAttribute ("identifier", slot.pluginIdentifier);
+            plugEl->setAttribute ("name",       slot.pluginName);
+            plugEl->setAttribute ("bypassed",   slot.isBypassed ? 1 : 0);
+
+            if (slot.stateData.getSize() > 0)
+            {
+                juce::String b64 = juce::Base64::toBase64 (slot.stateData.getData(),
+                                                           slot.stateData.getSize());
+                plugEl->setAttribute ("state", b64);
+            }
+        }
+        return el;
+    }
+
+    bool ProjectState::xmlToFxBusState (const juce::XmlElement* el,
+                                        ProjectData::FxBusState& s)
+    {
+        if (el == nullptr) return false;
+
+        s.bypassed    = el->getIntAttribute    ("bypassed",    0) != 0;
+        s.returnLevel = (float) el->getDoubleAttribute ("returnLevel", 0.75);
+        for (int i = 0; i < 4; ++i)
+            s.sendLevels[i] = (float) el->getDoubleAttribute ("send" + juce::String (i), 0.0);
+
+        s.plugins.clear();
+        for (auto* plugEl : el->getChildIterator())
+        {
+            PluginSlotState slot;
+            slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");
+            slot.pluginName       = plugEl->getStringAttribute ("name");
+            slot.isBypassed       = plugEl->getIntAttribute    ("bypassed", 0) != 0;
+
+            juce::String b64 = plugEl->getStringAttribute ("state");
+            if (b64.isNotEmpty())
+            {
+                juce::MemoryOutputStream mos;
+                juce::Base64::convertFromBase64 (mos, b64);
+                slot.stateData = mos.getMemoryBlock();
+            }
+            s.plugins.add (slot);
+        }
+        return true;
+    }
+
+────────────────────────────────────────────────────────────────
+IMPORTANT: INCLUDE CYCLE NOTE
+────────────────────────────────────────────────────────────────
+
+FxBus.h currently includes ProjectState.h (for PluginSlotState).
+ProjectState.h now needs ProjectData::FxBusState which mirrors
+FxBus::State. To avoid a circular include:
+
+  • Keep FxBus::State and ProjectData::FxBusState as SEPARATE
+    structs (they have identical fields).
+
+  • In MainComponent::loadProjectData, convert:
+        data.fxBusState  →  FxBus::State
+    by mapping fields manually, e.g.:
+
+        FxBus::State fbs;
+        for (int i = 0; i < 4; ++i)
+            fbs.sendLevels[i] = data.fxBusState.sendLevels[i];
+        fbs.returnLevel = data.fxBusState.returnLevel;
+        fbs.bypassed    = data.fxBusState.bypassed;
+        fbs.plugins     = data.fxBusState.plugins;   // Array copy
+        fxBus->setState (fbs);
+
+  • In MainComponent::collectProjectData, convert back:
+        FxBus::State fbs = fxBus->getState();
+        for (int i = 0; i < 4; ++i)
+            data.fxBusState.sendLevels[i] = fbs.sendLevels[i];
+        data.fxBusState.returnLevel = fbs.returnLevel;
+        data.fxBusState.bypassed    = fbs.bypassed;
+        data.fxBusState.plugins     = fbs.plugins;
+
+  Alternatively, break the cycle by extracting PluginSlotState into
+  its own header (PluginSlotState.h), which is the cleanest long-term
+  solution and removes the dependency from FxBus.h → ProjectState.h.

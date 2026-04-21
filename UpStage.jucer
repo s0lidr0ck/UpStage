@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="UpStage" name="UpStage" projectType="guiapp" version="0.4.0"
+              jucePath="C:\JUCE" displaySplashScreen="0" reportAppUsage="0"
+              splashScreenColour="Dark" addUsingNamespaceToJuceHeader="0" companyName="UpStage"
+              companyCopyright="2026" companyWebsite="" companyEmail="" jucerFormatVersion="1"
+              cppLanguageStandard="17">
+  <MAINGROUP id="UpStage" name="UpStage">
+    <GROUP id="Source" name="Source">
+      <FILE id="AppConfigH" name="AppConfig.h" compile="0" resource="0" file="Source/AppConfig.h"/>
+      <FILE id="MainCpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+      <FILE id="MainComponentH" name="MainComponent.h" compile="0" resource="0"
+            file="Source/MainComponent.h"/>
+      <FILE id="MainComponentCpp" name="MainComponent.cpp" compile="1" resource="0"
+            file="Source/MainComponent.cpp"/>
+      <FILE id="ChannelStripH" name="ChannelStrip.h" compile="0" resource="0"
+            file="Source/ChannelStrip.h"/>
+      <FILE id="ChannelStripCpp" name="ChannelStrip.cpp" compile="1" resource="0"
+            file="Source/ChannelStrip.cpp"/>
+      <FILE id="ChannelStripPanelH" name="ChannelStripPanel.h" compile="0"
+            resource="0" file="Source/ChannelStripPanel.h"/>
+      <FILE id="ChannelStripPanelCpp" name="ChannelStripPanel.cpp" compile="1"
+            resource="0" file="Source/ChannelStripPanel.cpp"/>
+      <FILE id="MidiTranslatorH" name="MidiTranslator.h" compile="0" resource="0"
+            file="Source/MidiTranslator.h"/>
+      <FILE id="MidiTranslatorCpp" name="MidiTranslator.cpp" compile="1"
+            resource="0" file="Source/MidiTranslator.cpp"/>
+      <FILE id="InputRouterH" name="InputRouter.h" compile="0" resource="0"
+            file="Source/InputRouter.h"/>
+      <FILE id="InputRouterCpp" name="InputRouter.cpp" compile="1" resource="0"
+            file="Source/InputRouter.cpp"/>
+      <FILE id="RecorderH" name="Recorder.h" compile="0" resource="0" file="Source/Recorder.h"/>
+      <FILE id="RecorderCpp" name="Recorder.cpp" compile="1" resource="0"
+            file="Source/Recorder.cpp"/>
+      <FILE id="ProjectStateH" name="ProjectState.h" compile="0" resource="0"
+            file="Source/ProjectState.h"/>
+      <FILE id="ProjectStateCpp" name="ProjectState.cpp" compile="1" resource="0"
+            file="Source/ProjectState.cpp"/>
+      <FILE id="SetlistManagerH" name="SetlistManager.h" compile="0" resource="0"
+            file="Source/SetlistManager.h"/>
+      <FILE id="SetlistManagerCpp" name="SetlistManager.cpp" compile="1"
+            resource="0" file="Source/SetlistManager.cpp"/>
+      <FILE id="SetlistPanelH" name="SetlistPanel.h" compile="0" resource="0"
+            file="Source/SetlistPanel.h"/>
+      <FILE id="SetlistPanelCpp" name="SetlistPanel.cpp" compile="1" resource="0"
+            file="Source/SetlistPanel.cpp"/>
+      <FILE id="SceneManagerH" name="SceneManager.h" compile="0" resource="0"
+            file="Source/SceneManager.h"/>
+      <FILE id="SceneManagerCpp" name="SceneManager.cpp" compile="1" resource="0"
+            file="Source/SceneManager.cpp"/>
+      <FILE id="TapTempoH" name="TapTempo.h" compile="0" resource="0" file="Source/TapTempo.h"/>
+      <FILE id="TapTempoCpp" name="TapTempo.cpp" compile="1" resource="0"
+            file="Source/TapTempo.cpp"/>
+      <FILE id="TunerPanelH" name="TunerPanel.h" compile="0" resource="0"
+            file="Source/TunerPanel.h"/>
+      <FILE id="TunerPanelCpp" name="TunerPanel.cpp" compile="1" resource="0"
+            file="Source/TunerPanel.cpp"/>
+      <FILE id="LevelMeterH" name="LevelMeter.h" compile="0" resource="0"
+            file="Source/LevelMeter.h"/>
+      <FILE id="LevelMeterCpp" name="LevelMeter.cpp" compile="1" resource="0"
+            file="Source/LevelMeter.cpp"/>
+      <FILE id="NoiseGateH" name="NoiseGate.h" compile="0" resource="0" file="Source/NoiseGate.h"/>
+      <FILE id="NoiseGateCpp" name="NoiseGate.cpp" compile="1" resource="0"
+            file="Source/NoiseGate.cpp"/>
+      <FILE id="MidiLearnManagerH" name="MidiLearnManager.h" compile="0"
+            resource="0" file="Source/MidiLearnManager.h"/>
+      <FILE id="MidiLearnManagerCpp" name="MidiLearnManager.cpp" compile="1"
+            resource="0" file="Source/MidiLearnManager.cpp"/>
+      <FILE id="FxBusH" name="FxBus.h" compile="0" resource="0" file="Source/FxBus.h"/>
+      <FILE id="FxBusCpp" name="FxBus.cpp" compile="1" resource="0" file="Source/FxBus.cpp"/>
+      <FILE id="FxBusPanelH" name="FxBusPanel.h" compile="0" resource="0"
+            file="Source/FxBusPanel.h"/>
+      <FILE id="FxBusPanelCpp" name="FxBusPanel.cpp" compile="1" resource="0"
+            file="Source/FxBusPanel.cpp"/>
+      <FILE id="UpStageLookAndFeelH" name="UpStageLookAndFeel.h" compile="0"
+            resource="0" file="Source/UpStageLookAndFeel.h"/>
+      <FILE id="UpStageLookAndFeelCpp" name="UpStageLookAndFeel.cpp" compile="1"
+            resource="0" file="Source/UpStageLookAndFeel.cpp"/>
+      <FILE id="SignalChainViewH" name="SignalChainView.h" compile="0" resource="0"
+            file="Source/SignalChainView.h"/>
+      <FILE id="ChannelColourButtonH" name="ChannelColourButton.h" compile="0"
+            resource="0" file="Source/ChannelColourButton.h"/>
+      <FILE id="MixerLookAndFeelH" name="MixerLookAndFeel.h" compile="0"
+            resource="0" file="Source/MixerLookAndFeel.h"/>
+      <FILE id="PluginManagerWindowH" name="PluginManagerWindow.h" compile="0"
+            resource="0" file="Source/PluginManagerWindow.h"/>
+      <FILE id="PluginManagerWindowCpp" name="PluginManagerWindow.cpp" compile="1"
+            resource="0" file="Source/PluginManagerWindow.cpp"/>
+      <FILE id="PluginBrowserWindowH" name="PluginBrowserWindow.h" compile="0"
+            resource="0" file="Source/PluginBrowserWindow.h"/>
+      <FILE id="PluginBrowserWindowCpp" name="PluginBrowserWindow.cpp" compile="1"
+            resource="0" file="Source/PluginBrowserWindow.cpp"/>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" JUCE_PLUGINHOST_VST3="1"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="0"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
+  </MODULES>
+  <EXPORTFORMATS>
+    <VS2022 targetFolder="Builds/VisualStudio2025" extraSearchPaths="$(JUCE_PATH)&#10;$(JUCE_PATH)/modules/juce_audio_processors/format_types/VST3_SDK&#10;C:\VST_SDK\vst3sdk"
+            vst3Path="C:\VST_SDK\vst3sdk" toolset="v145" cppLanguageStandard="17">
+      <CONFIGURATIONS>
+        <CONFIGURATION name="Debug" isDebug="1" optimisation="1" targetName="UpStage"
+                       preprocessorDefs="JUCE_PLUGINHOST_VST3=1" headerPath="C:\VST_SDK\vst3sdk"
+                       defines="JUCE_PLUGINHOST_VST3=1"/>
+        <CONFIGURATION name="Release" isDebug="0" optimisation="3" targetName="UpStage"
+                       preprocessorDefs="JUCE_PLUGINHOST_VST3=1" headerPath="C:\VST_SDK\vst3sdk"
+                       defines="JUCE_PLUGINHOST_VST3=1"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_processors_headless" path="C:\JUCE\modules"/>
+      </MODULEPATHS>
+    </VS2022>
+  </EXPORTFORMATS>
+  <JUCEOPTIONS JUCE_PLUGINHOST_VST3="1" JUCE_PLUGINHOST_VST="0" JUCE_PLUGINHOST_AU="0" JUCE_ASIO="1"/>
+</JUCERPROJECT>
