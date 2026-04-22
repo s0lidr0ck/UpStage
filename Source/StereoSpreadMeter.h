@@ -86,12 +86,8 @@ public:
             g.fillRect (cx - halfW, barY, halfW, barH);
         }
 
-        // Correlation indicator at top
-        float corrX = cx;
-        if (displayCorrelation >= 0.0f)
-            corrX = cx - displayCorrelation * dispW * 0.4f;
-        else
-            corrX = cx - displayCorrelation * dispW * 0.4f;
+        // Correlation indicator at top (+1 = right = mono, -1 = left = anti-phase)
+        float corrX = cx + displayCorrelation * dispW * 0.4f;
 
         float dotR = 3.0f;
         juce::Colour dotCol = (displayCorrelation > 0.3f) ? juce::Colour (0xff44cc66)
@@ -103,8 +99,8 @@ public:
         // +1/-1 labels
         g.setColour (juce::Colour (0xff555577));
         g.setFont (juce::Font (juce::FontOptions().withHeight (7.0f)));
-        g.drawText ("+1", (int)(display.getX()), (int)(display.getY()), 14, 10, juce::Justification::centred, false);
-        g.drawText ("-1", (int)(display.getRight() - 14), (int)(display.getY()), 14, 10, juce::Justification::centred, false);
+        g.drawText ("-1", (int)(display.getX()), (int)(display.getY()), 14, 10, juce::Justification::centred, false);
+        g.drawText ("+1", (int)(display.getRight() - 14), (int)(display.getY()), 14, 10, juce::Justification::centred, false);
 
         // Glass
         {

@@ -358,6 +358,21 @@ private:
     float lufsAccumulator = 0.0f;
     int   lufsSampleCount = 0;
 
+    // K-weighting biquad filters for LUFS
+    struct Biquad {
+        float b0=1,b1=0,b2=0,a1=0,a2=0, z1=0,z2=0;
+        float process (float x) {
+            float y = b0*x + b1*z1 + b2*z2 - a1*z1 - a2*z2;
+            // direct form II transposed
+            float w = x - a1*z1 - a2*z2;
+            y = b0*w + b1*z1 + b2*z2;
+            z2 = z1; z1 = w;
+            return y;
+        }
+        void reset() { z1 = z2 = 0; }
+    };
+    Biquad kShelfL, kShelfR, kHpL, kHpR;
+
     enum MenuIDs
     {
         MenuNew = 1, MenuOpen, MenuSave, MenuSaveAs,

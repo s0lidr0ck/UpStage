@@ -185,7 +185,7 @@ private:
 
         juce::ScopedLock sl (bufferLock);
 
-        int analysisSize = juce::jmin (2048, BUFFER_SIZE);
+        int analysisSize = juce::jmin (512, BUFFER_SIZE);
         int startIdx = (writeIndex - analysisSize + BUFFER_SIZE) % BUFFER_SIZE;
 
         for (int i = 0; i < analysisSize; ++i)

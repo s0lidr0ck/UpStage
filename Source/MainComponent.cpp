@@ -702,6 +702,37 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
     metronome  .prepare (sr, blockSize);
     looper     .prepare (sr, blockSize);
     recorder   .prepare (sr, 2);
+
+    // K-weighting biquad coefficients (ITU-R BS.1770)
+    // Stage 1: high shelf ~+4dB above 1681Hz
+    {
+        float A  = std::pow (10.0f, 4.0f / 40.0f); // +4dB
+        float w0 = 2.0f * juce::MathConstants<float>::pi * 1681.0f / (float) sr;
+        float cs = std::cos (w0), sn = std::sin (w0);
+        float alpha = sn / (2.0f * 0.7071f);
+        float a0 = (A+1) - (A-1)*cs + 2*std::sqrt(A)*alpha;
+        kShelfL.b0 = (A*((A+1)+(A-1)*cs+2*std::sqrt(A)*alpha)) / a0;
+        kShelfL.b1 = (-2*A*((A-1)+(A+1)*cs)) / a0;
+        kShelfL.b2 = (A*((A+1)+(A-1)*cs-2*std::sqrt(A)*alpha)) / a0;
+        kShelfL.a1 = (-2*((A-1)-(A+1)*cs)) / a0;
+        kShelfL.a2 = ((A+1)-(A-1)*cs-2*std::sqrt(A)*alpha) / a0;
+        kShelfR = kShelfL;
+        kShelfL.reset(); kShelfR.reset();
+    }
+    // Stage 2: high-pass at 38Hz
+    {
+        float w0 = 2.0f * juce::MathConstants<float>::pi * 38.0f / (float) sr;
+        float cs = std::cos (w0);
+        float alpha = std::sin (w0) / (2.0f * 0.5f);
+        float a0 = 1 + alpha;
+        kHpL.b0 = ((1+cs)/2) / a0;
+        kHpL.b1 = (-(1+cs))  / a0;
+        kHpL.b2 = ((1+cs)/2) / a0;
+        kHpL.a1 = (-2*cs)    / a0;
+        kHpL.a2 = (1-alpha)  / a0;
+        kHpR = kHpL;
+        kHpL.reset(); kHpR.reset();
+    }
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
@@ -990,13 +1021,15 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
             fxBusPanel->pushGoniometerSamples (lPtr, rPtr, info.numSamples);
     }
 
-    // ---- Short-term LUFS approximation (~400ms window) ----
+    // ---- Short-term LUFS with K-weighting (~400ms window) ----
     {
         float sumSq = 0.0f;
         for (int s = 0; s < info.numSamples; ++s)
         {
             float l = work.getReadPointer (0)[s];
             float r = work.getReadPointer (1)[s];
+            l = kHpL.process (kShelfL.process (l));
+            r = kHpR.process (kShelfR.process (r));
             sumSq += l * l + r * r;
         }
         lufsAccumulator += sumSq;
@@ -1712,15 +1745,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    // Ctrl+Z = Undo
-    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'Z')
-    {
-        if (key.getModifiers().isShiftDown())
-            undoManager.redo();
-        else
-            undoManager.undo();
-        return true;
-    }
+    // Ctrl+Z = Undo (disabled — only fader drags are undoable, incomplete)
+    // TODO: expand undo to cover all mutations before re-enabling
 
     // 1-4 = Switch channel (main keyboard)
     if (key.getKeyCode() >= '1' && key.getKeyCode() <= '4' && ! key.getModifiers().isAnyModifierKeyDown())
