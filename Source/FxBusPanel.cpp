@@ -51,6 +51,7 @@ FxBusPanel::FxBusPanel (FxBus& b)
     vuMeterOut.setMeterLabel ("VU");
     peakMeter.setLabel ("PEAK");
     peakMeter.setMeterLabel ("PEAK");
+    peakMeter.setFastMode (true);
     lufsMeter.setLabel ("LUFS");
     lufsMeter.setMeterLabel ("LUFS");
 

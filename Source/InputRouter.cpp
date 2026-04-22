@@ -1,6 +1,6 @@
 #include "InputRouter.h"
 
-InputRouter::InputRouter() : juce::Thread ("InputRouter")
+InputRouter::InputRouter()
 {
     formatManager.registerBasicFormats(); // WAV, AIFF, MP3 (via OS decoders)
     transportSource.addChangeListener (this);

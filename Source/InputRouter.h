@@ -12,8 +12,7 @@
  * In both modes the output is a single mono buffer (guitar is mono).
  * The active ChannelStrip will expand to stereo internally if needed.
  */
-class InputRouter : private juce::Thread,
-                    private juce::ChangeListener
+class InputRouter : private juce::ChangeListener
 {
 public:
     enum class Mode { Live, Loop };
@@ -61,7 +60,6 @@ private:
     bool                  loopPlaying = false;
     juce::String          loopFileName;
 
-    void run() override {} // unused but needed by Thread
     void changeListenerCallback (juce::ChangeBroadcaster*) override {}
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InputRouter)

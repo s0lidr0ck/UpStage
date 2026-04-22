@@ -265,8 +265,11 @@ public:
     void resized() override { repaint(); }
     static int preferredHeight() { return 62; }
 
+    void setFastMode (bool on) { fastMode = on; }
+
 private:
     Theme theme;
+    bool fastMode = false;
     std::atomic<float> targetDb { -60.0f };
     float displayDb = -60.0f;
     juce::String label;
@@ -275,7 +278,8 @@ private:
     void timerCallback() override
     {
         float target = targetDb.load (std::memory_order_relaxed);
-        float coeff = (target > displayDb) ? 0.25f : 0.04f;
+        float coeff = fastMode ? (target > displayDb ? 1.0f : 0.025f)
+                               : (target > displayDb ? 0.25f : 0.04f);
         displayDb += (target - displayDb) * coeff;
         repaint();
     }
