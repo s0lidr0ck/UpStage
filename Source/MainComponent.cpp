@@ -219,24 +219,6 @@ MainComponent::MainComponent() : menuBar (this)
     addAndMakeVisible (gateThreshSlider);
     addAndMakeVisible (gateThreshLabel);
 
-    // Signal chain view
-    signalChainView.setVisible (false);
-    signalChainView.onBlockClicked = [this] (SignalChainView::BlockID id)
-    {
-        switch (id)
-        {
-            case SignalChainView::BlockID::Gate:
-                noiseGate.enabled = ! noiseGate.enabled;
-                gateToggle.setToggleState (noiseGate.enabled, juce::dontSendNotification);
-                break;
-            case SignalChainView::BlockID::FxBus:
-                fxBus->setBypassed (! fxBus->isBypassed());
-                fxBusPanel->syncFromBus();
-                break;
-            default: break;
-        }
-    };
-
     // Scenes - right-click to save, hardware snapshot style
     for (int i = 0; i < NUM_SCENES; ++i)
     {
@@ -2414,11 +2396,6 @@ void MainComponent::timerCallback()
     }
 
     // Signal chain view
-    signalChainView.setChannelNumber (activeChannel);
-    signalChainView.setGateEnabled (noiseGate.enabled);
-    signalChainView.setFxBusBypassed (fxBus->isBypassed());
-    signalChainView.setInputMode (inputRouter.getMode() == InputRouter::Mode::Loop ? "Loop" : "Live");
-    signalChainView.setTrimDb ((float) inputTrimSlider.getValue());
 
     // Autosave (~60s at 30Hz timer)
     if (++autosaveCounter >= 1800)

@@ -22,7 +22,6 @@
 #include "PluginBrowserWindow.h"
 #include "Metronome.h"
 #include "Looper.h"
-#include "SignalChainView.h"
 #include "VuMeter.h"
 #include "MidiMonitorWindow.h"
 #include "MidiRulesPanel.h"
@@ -273,9 +272,6 @@ private:
     juce::ToggleButton gateToggle      { "Gate" };
     juce::Slider       gateThreshSlider;
     juce::Label        gateThreshLabel;
-
-    // Signal chain view
-    SignalChainView    signalChainView;
 
     // Scenes row (8 scene buttons)
     juce::TextButton   sceneButtons[NUM_SCENES];
