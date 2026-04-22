@@ -23,6 +23,8 @@
 #include "Metronome.h"
 #include "Looper.h"
 #include "SignalChainView.h"
+#include "VuMeter.h"
+#include "MidiMonitorWindow.h"
 #include "MidiRulesPanel.h"
 
 /**
@@ -76,6 +78,7 @@ public:
     void paint  (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
@@ -141,8 +144,11 @@ private:
     // Routing mode: parallel (all channels) vs single (active only)
     bool   parallelRouting = true;
 
-    // Numpad modifier state
-    bool   numpadPlusHeld = false;
+    // Per-channel crossfade gain for smooth switching in single mode
+    juce::SmoothedValue<float> channelFadeGain[NUM_CHANNELS];
+
+    // Numpad 9 prefix: press Numpad 9, then Numpad 1-4 to switch channel
+    bool   numpad9Prefix = false;
 
     // UI customization
     bool   uiEditMode = false;
@@ -312,8 +318,10 @@ private:
     // Tuner panel (hidden until activated)
     TunerPanel tunerPanel;
 
-    // MIDI activity LED
+    // MIDI activity LED + monitor
     juce::Label midiLedLabel;
+    std::unique_ptr<MidiMonitorWindow> midiMonitorWindow;
+    MidiRulesPanel* activeMidiRulesPanel = nullptr;
 
     // Status bar
     juce::Label statusLabel;
@@ -345,6 +353,10 @@ private:
     std::atomic<float> inputLevelOutL {}, inputLevelOutR {}; // Input after FX
     std::atomic<float> masterLevelInL {}, masterLevelInR {};   // Master before FX bus
     std::atomic<float> masterLevelOutL {}, masterLevelOutR {}; // Master after FX bus
+    std::atomic<float> masterStereoL {}, masterStereoR {};     // For stereo spread
+    std::atomic<float> masterLufsDb { -60.0f };                // Short-term LUFS
+    float lufsAccumulator = 0.0f;
+    int   lufsSampleCount = 0;
 
     enum MenuIDs
     {
@@ -369,6 +381,12 @@ private:
     juce::StringArray loadRecentProjects();
     void addToRecentProjects (const juce::File& file);
     void openRecentProject (int index);
+
+    static juce::File getSettingsFile();
+    void saveAudioDeviceState();
+    void restoreAudioDeviceState();
+
+    std::unique_ptr<juce::FileChooser> fileChooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

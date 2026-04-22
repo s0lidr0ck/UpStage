@@ -40,18 +40,18 @@ public:
                               juce::Colours::darkgrey,
                               DocumentWindow::allButtons)
         {
-            setUsingNativeTitleBar (true);
+            setUsingNativeTitleBar (false);
 
             try {
                 auto* mainComp = new MainComponent();
                 setContentOwned (mainComp, true);
                 setResizable (true, true);
 
-                // Position at left edge of screen, full height
+                // Default position: left edge, full height — overridden by saved settings
                 auto display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
                 if (display != nullptr)
                 {
-                    auto area = display->userArea; // Excludes taskbar
+                    auto area = display->userArea;
                     setBounds (area.getX(), area.getY(), 640, area.getHeight());
                 }
                 else

@@ -172,6 +172,12 @@ bool  FxBus::isBypassed()  const   { return bypassed.load(); }
 //==============================================================================
 void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples)
 {
+    juce::MidiBuffer empty;
+    processBlock (buffer, numSamples, empty);
+}
+
+void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples, juce::MidiBuffer& midi)
+{
     if (bypassed.load (std::memory_order_relaxed))
         return;
 
@@ -180,13 +186,12 @@ void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples)
     if (pluginChain.isEmpty())
         return;
 
-    juce::MidiBuffer dummyMidi;
-
     for (auto* entry : pluginChain)
     {
         if (entry->processor == nullptr) continue;
         if (entry->bypassed)             continue;
 
+        juce::MidiBuffer pluginMidi (midi);
         auto expected = entry->processor->getTotalNumInputChannels();
         if (expected > buffer.getNumChannels())
         {
@@ -194,13 +199,13 @@ void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples)
             padded.clear();
             for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                 padded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
-            entry->processor->processBlock (padded, dummyMidi);
+            entry->processor->processBlock (padded, pluginMidi);
             for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                 buffer.copyFrom (ch, 0, padded, ch, 0, buffer.getNumSamples());
         }
         else
         {
-            entry->processor->processBlock (buffer, dummyMidi);
+            entry->processor->processBlock (buffer, pluginMidi);
         }
     }
 }

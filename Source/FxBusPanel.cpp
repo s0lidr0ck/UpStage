@@ -20,46 +20,46 @@ FxBusPanel::FxBusPanel (FxBus& b)
     addFxButton.onClick = [this] { if (onAddPluginClicked) onAddPluginClicked(); };
     addAndMakeVisible (addFxButton);
 
-    // Master fader
-    masterFader.setName ("master_fader");
-    masterFader.setComponentID ("master_fader");
-    masterFader.setSliderStyle (juce::Slider::LinearVertical);
-    masterFader.setRange (-60.0, 12.0, 0.1);
-    masterFader.setValue (0.0);
-    masterFader.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    masterFader.setSkewFactorFromMidPoint (-12.0);
-    masterFader.setDoubleClickReturnValue (true, 0.0);
-    masterFader.addListener (this);
-    addAndMakeVisible (masterFader);
+    // Master knob (replaces fader)
+    masterKnob.setName ("master_knob");
+    masterKnob.setComponentID ("master_knob");
+    masterKnob.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    masterKnob.setRange (-60.0, 12.0, 0.1);
+    masterKnob.setValue (0.0);
+    masterKnob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    masterKnob.setDoubleClickReturnValue (true, 0.0);
+    masterKnob.addListener (this);
+    addAndMakeVisible (masterKnob);
 
-    masterFaderLabel.setText ("0.0 dB", juce::dontSendNotification);
-    masterFaderLabel.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
-    masterFaderLabel.setJustificationType (juce::Justification::centred);
-    masterFaderLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaaaaaa));
-    masterFaderLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
-    masterFaderLabel.setColour (juce::Label::outlineColourId, juce::Colour (0xff333333));
-    masterFaderLabel.setEditable (false, true, false);
-    masterFaderLabel.onTextChange = [this] {
-        auto text = masterFaderLabel.getText().trimCharactersAtEnd (" dB").trim();
+    masterKnobLabel.setText ("0.0 dB", juce::dontSendNotification);
+    masterKnobLabel.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+    masterKnobLabel.setJustificationType (juce::Justification::centred);
+    masterKnobLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaaaaaa));
+    masterKnobLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
+    masterKnobLabel.setColour (juce::Label::outlineColourId, juce::Colour (0xff333333));
+    masterKnobLabel.setEditable (false, true, false);
+    masterKnobLabel.onTextChange = [this] {
+        auto text = masterKnobLabel.getText().trimCharactersAtEnd (" dB").trim();
         double db = juce::jlimit (-60.0, 12.0, text.getDoubleValue());
-        masterFader.setValue (db);
+        masterKnob.setValue (db);
     };
-    addAndMakeVisible (masterFaderLabel);
+    addAndMakeVisible (masterKnobLabel);
 
-    addAndMakeVisible (meterIn);
-    addAndMakeVisible (meterOut);
+    vuMeterIn.setLabel ("IN");
+    vuMeterIn.setMeterLabel ("VU");
+    vuMeterOut.setLabel ("OUT");
+    vuMeterOut.setMeterLabel ("VU");
+    peakMeter.setLabel ("PEAK");
+    peakMeter.setMeterLabel ("PEAK");
+    lufsMeter.setLabel ("LUFS");
+    lufsMeter.setMeterLabel ("LUFS");
 
-    meterInLabel.setText ("IN", juce::dontSendNotification);
-    meterInLabel.setFont (juce::Font (juce::FontOptions().withHeight (9.0f)));
-    meterInLabel.setJustificationType (juce::Justification::centred);
-    meterInLabel.setColour (juce::Label::textColourId, juce::Colour (0xff998844));
-    addAndMakeVisible (meterInLabel);
-
-    meterOutLabel.setText ("OUT", juce::dontSendNotification);
-    meterOutLabel.setFont (juce::Font (juce::FontOptions().withHeight (9.0f)));
-    meterOutLabel.setJustificationType (juce::Justification::centred);
-    meterOutLabel.setColour (juce::Label::textColourId, juce::Colour (0xff449944));
-    addAndMakeVisible (meterOutLabel);
+    addAndMakeVisible (vuMeterIn);
+    addAndMakeVisible (vuMeterOut);
+    addAndMakeVisible (peakMeter);
+    addAndMakeVisible (lufsMeter);
+    addAndMakeVisible (spreadMeter);
+    addAndMakeVisible (goniometer);
 
     rebuildSlots();
 }
@@ -114,7 +114,6 @@ void FxBusPanel::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
-    // Warm gradient background - slightly warmer than channel strips
     juce::ColourGradient bg (
         juce::Colour (0xff342e28), bounds.getCentreX(), bounds.getY(),
         juce::Colour (0xff241e1a), bounds.getCentreX(), bounds.getBottom(), false);
@@ -122,7 +121,6 @@ void FxBusPanel::paint (juce::Graphics& g)
     g.setGradientFill (bg);
     g.fillAll();
 
-    // Subtle horizontal brushed texture
     juce::Random rng (99);
     for (int ty = 0; ty < getHeight(); ty += 2)
     {
@@ -131,13 +129,11 @@ void FxBusPanel::paint (juce::Graphics& g)
         g.drawHorizontalLine (ty, 0.0f, bounds.getWidth());
     }
 
-    // Left border groove
     g.setColour (juce::Colour (0xff060504));
     g.drawVerticalLine (0, 0.0f, (float) getHeight());
     g.setColour (juce::Colours::white.withAlpha (0.04f));
     g.drawVerticalLine (1, 0.0f, (float) getHeight());
 
-    // Draw insert slots
     int slotStartY = headerLabel.getBottom() + 4;
 
     for (int i = 0; i < FxBus::MAX_FX_SLOTS; ++i)
@@ -145,33 +141,26 @@ void FxBusPanel::paint (juce::Graphics& g)
         int sy = slotStartY + i * (kSlotHeight + kSlotPadding);
         auto slotRect = juce::Rectangle<int> (6, sy, getWidth() - 12, kSlotHeight);
 
-        // Slot background
         if (slots[i].empty)
         {
             g.setColour (juce::Colour (0xff1a1816));
             g.fillRoundedRectangle (slotRect.toFloat(), 3.0f);
-
-            // Dashed outline for empty
             g.setColour (juce::Colour (0xff3a3530));
             g.drawRoundedRectangle (slotRect.toFloat(), 3.0f, 1.0f);
-
             g.setColour (juce::Colour (0xff4a4540));
             g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
             g.drawText ("Insert " + juce::String (i + 1), slotRect, juce::Justification::centred);
         }
         else
         {
-            // Filled slot
             g.setColour (juce::Colour (0xff252220));
             g.fillRoundedRectangle (slotRect.toFloat(), 3.0f);
 
-            // Bypass dot
             auto dotRect = slotRect.removeFromLeft (16);
             auto dotCentre = dotRect.getCentre().toFloat();
             g.setColour (slots[i].bypassed ? juce::Colour (0xff555555) : juce::Colour (0xff27ae60));
             g.fillEllipse (dotCentre.x - 3.0f, dotCentre.y - 3.0f, 6.0f, 6.0f);
 
-            // Plugin name
             g.setColour (slots[i].bypassed ? juce::Colour (0xff777777) : juce::Colour (0xffcccccc));
             g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
             g.drawText (slots[i].name, slotRect.reduced (4, 0), juce::Justification::centredLeft, true);
@@ -187,36 +176,45 @@ void FxBusPanel::resized()
     headerLabel.setBounds (strip.removeFromTop (28));
     strip.removeFromTop (2);
 
-    // Slots are painted, not laid out as children - skip their area
     int slotsHeight = FxBus::MAX_FX_SLOTS * (kSlotHeight + kSlotPadding);
     strip.removeFromTop (slotsHeight);
     strip.removeFromTop (2);
 
-    // Add insert button
     addFxButton.setBounds (strip.removeFromTop (22));
-    strip.removeFromTop (4);
+    strip.removeFromTop (2);
 
-    // Bypass toggle
     bypassToggle.setBounds (strip.removeFromTop (18).reduced (2, 0));
     strip.removeFromTop (4);
 
-    // Master fader dB label
-    masterFaderLabel.setBounds (strip.removeFromTop (18));
+    // VU meters
+    int vuH = VuMeter::preferredHeight();
+    vuMeterIn.setBounds (strip.removeFromTop (vuH).reduced (2, 0));
+    strip.removeFromTop (2);
+    vuMeterOut.setBounds (strip.removeFromTop (vuH).reduced (2, 0));
     strip.removeFromTop (2);
 
-    // Meter labels at bottom
-    auto meterLabelRow = strip.removeFromBottom (12);
-    meterInLabel.setBounds (meterLabelRow.getX(), meterLabelRow.getY(), 18, 12);
-    meterOutLabel.setBounds (meterLabelRow.getRight() - 22, meterLabelRow.getY(), 22, 12);
+    // Peak and LUFS meters
+    peakMeter.setBounds (strip.removeFromTop (vuH).reduced (2, 0));
+    strip.removeFromTop (2);
+    lufsMeter.setBounds (strip.removeFromTop (vuH).reduced (2, 0));
+    strip.removeFromTop (2);
 
-    // Meters beside fader: IN meter | fader | OUT meter
-    meterIn.setBounds (strip.removeFromLeft (14));
-    strip.removeFromLeft (1);
-    meterOut.setBounds (strip.removeFromRight (14));
-    strip.removeFromRight (1);
+    // Stereo spread
+    spreadMeter.setBounds (strip.removeFromTop (StereoSpreadMeter::preferredHeight()).reduced (2, 0));
+    strip.removeFromTop (2);
 
-    // Master fader fills remaining space
-    masterFader.setBounds (strip);
+    // Goniometer
+    goniometer.setBounds (strip.removeFromTop (GoniometerMeter::preferredHeight()).reduced (2, 0));
+    strip.removeFromTop (4);
+
+    // Master knob label
+    masterKnobLabel.setBounds (strip.removeFromTop (18));
+    strip.removeFromTop (2);
+
+    // Master knob — centered, fills remaining
+    int knobSize = juce::jmin (strip.getWidth() - 8, strip.getHeight());
+    knobSize = juce::jmax (40, knobSize);
+    masterKnob.setBounds (strip.withSizeKeepingCentre (knobSize, knobSize));
 }
 
 //==============================================================================
@@ -240,7 +238,6 @@ void FxBusPanel::mouseDown (const juce::MouseEvent& e)
 
     if (slots[slotIndex].empty)
     {
-        // Click empty slot = add plugin
         if (e.mods.isLeftButtonDown())
         {
             if (onAddPluginClicked) onAddPluginClicked();
@@ -248,7 +245,6 @@ void FxBusPanel::mouseDown (const juce::MouseEvent& e)
     }
     else if (e.mods.isLeftButtonDown() && ! e.mods.isRightButtonDown())
     {
-        // Left click = toggle bypass
         bool bp = bus.isPluginBypassed (slotIndex);
         bus.setPluginBypassed (slotIndex, ! bp);
         refresh();
@@ -295,22 +291,38 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
 //==============================================================================
 void FxBusPanel::pushMeterLevels (float inL, float inR, float outL, float outR)
 {
-    meterIn.pushLevel (inL, inR);
-    meterOut.pushLevel (outL, outR);
+    vuMeterIn.pushLevel (inL, inR);
+    vuMeterOut.pushLevel (outL, outR);
+    peakMeter.pushLevel (outL, outR);
+}
+
+void FxBusPanel::pushStereo (float left, float right)
+{
+    spreadMeter.pushStereo (left, right);
+}
+
+void FxBusPanel::pushLufs (float lufsDb)
+{
+    lufsMeter.pushDb (lufsDb);
+}
+
+void FxBusPanel::pushGoniometerSamples (const float* leftData, const float* rightData, int numSamples)
+{
+    goniometer.pushSamples (leftData, rightData, numSamples);
 }
 
 void FxBusPanel::setMasterFaderDb (float db)
 {
-    masterFader.setValue (db, juce::dontSendNotification);
+    masterKnob.setValue (db, juce::dontSendNotification);
 }
 
 void FxBusPanel::sliderValueChanged (juce::Slider* s)
 {
-    if (s == &masterFader)
+    if (s == &masterKnob)
     {
         float db = (float) s->getValue();
         juce::String text = (db <= -59.9f) ? "-INF" : juce::String (db, 1) + " dB";
-        masterFaderLabel.setText (text, juce::dontSendNotification);
+        masterKnobLabel.setText (text, juce::dontSendNotification);
         if (onMasterFaderChanged) onMasterFaderChanged (db);
     }
 }

@@ -98,12 +98,38 @@ MainComponent::MainComponent() : menuBar (this)
 
     loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
     loopRecButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88cc88));
+    loopRecButton.addMouseListener (this, false);
 
     looperProgressLabel.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
     looperProgressLabel.setJustificationType (juce::Justification::centred);
     looperProgressLabel.setColour (juce::Label::textColourId, juce::Colour (0xff88cc88));
     looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x00000000));
     addAndMakeVisible (looperProgressLabel);
+
+    looper.onRecordingStarted = [this]()
+    {
+        juce::MessageManager::callAsync ([this]()
+        {
+            if (looper.getCountInBeats() > 0 && ! metronome.isEnabled())
+            {
+                metronome.setBPM (tapTempo.getBPM());
+                metronome.setTimeSignature (looper.getMeterNum(), looper.getMeterDen());
+                metronome.setEnabled (true);
+                metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff4444aa));
+            }
+        });
+    };
+    looper.onRecordingStopped = [this]()
+    {
+        juce::MessageManager::callAsync ([this]()
+        {
+            if (looper.getCountInBeats() > 0 && metronome.isEnabled())
+            {
+                metronome.setEnabled (false);
+                metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2a3a));
+            }
+        });
+    };
 
     routingModeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a3a));
     routingModeButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88cccc));
@@ -194,7 +220,7 @@ MainComponent::MainComponent() : menuBar (this)
     addAndMakeVisible (gateThreshLabel);
 
     // Signal chain view
-    addAndMakeVisible (signalChainView);
+    signalChainView.setVisible (false);
     signalChainView.onBlockClicked = [this] (SignalChainView::BlockID id)
     {
         switch (id)
@@ -518,6 +544,7 @@ MainComponent::MainComponent() : menuBar (this)
     midiLedLabel.setJustificationType (juce::Justification::centred);
     midiLedLabel.setColour (juce::Label::textColourId, juce::Colour (0xff444444));
     midiLedLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
+    midiLedLabel.addMouseListener (this, false);
     addAndMakeVisible (midiLedLabel);
 
     // Status bar
@@ -586,14 +613,15 @@ MainComponent::MainComponent() : menuBar (this)
     DBG (typeNames);  // Debug output to see what types were found
 
     setAudioChannels (1, 2);
+    restoreAudioDeviceState();
 
-    auto midiDevices = juce::MidiInput::getAvailableDevices();
-    if (! midiDevices.isEmpty())
+    // Enable ALL MIDI inputs so every connected device is heard
+    for (auto& dev : juce::MidiInput::getAvailableDevices())
     {
-        activeMidiInputId = midiDevices[0].identifier;
-        deviceManager.addMidiInputDeviceCallback (activeMidiInputId, this);
-        deviceManager.setMidiInputDeviceEnabled  (activeMidiInputId, true);
+        deviceManager.setMidiInputDeviceEnabled (dev.identifier, true);
+        deviceManager.addMidiInputDeviceCallback (dev.identifier, this);
     }
+    activeMidiInputId = {};
 
     auto midiOutDevices = juce::MidiOutput::getAvailableDevices();
     if (! midiOutDevices.isEmpty())
@@ -643,6 +671,7 @@ MainComponent::MainComponent() : menuBar (this)
 
 MainComponent::~MainComponent()
 {
+    saveAudioDeviceState();
     stopTimer();
     tapTempo.stopClock();
     shutdownAudio();
@@ -660,8 +689,12 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
 
     inputChannel->prepare (sr, blockSize);
 
-    for (auto& ch : channels)
-        ch->prepare (sr, blockSize);
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        channels[i]->prepare (sr, blockSize);
+        channelFadeGain[i].reset (sr, 0.01);
+        channelFadeGain[i].setCurrentAndTargetValue (i == activeChannel ? 1.0f : 0.0f);
+    }
 
     fxBus     ->prepare (sr, blockSize);
     inputRouter.prepare (sr, blockSize);
@@ -674,7 +707,6 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
 {
     auto* buffer = info.buffer;
-    buffer->clear (info.startSample, info.numSamples);
 
     // ---- Build working stereo buffer ----
     juce::AudioBuffer<float> work (2, info.numSamples);
@@ -682,7 +714,8 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
 
     if (inputRouter.getMode() == InputRouter::Mode::Live)
     {
-        if (buffer->getNumChannels() > 0)
+        if (buffer->getNumChannels() > 0
+            && currentProject.inputChannel < buffer->getNumChannels())
         {
             work.copyFrom (0, 0, *buffer, currentProject.inputChannel,
                            info.startSample, info.numSamples);
@@ -693,6 +726,8 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     {
         inputRouter.fillNextBlock (work);
     }
+
+    buffer->clear (info.startSample, info.numSamples);
 
     // ---- Input Trim ----
     {
@@ -707,17 +742,20 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     // ---- Noise gate ----
     noiseGate.processBlock (work);
 
+    // ---- Feed input to looper (for input capture mode) ----
+    looper.feedInput (work, info.numSamples);
+
     // ---- Measure input level (before FX) ----
-    inputLevelInL.store (work.getRMSLevel (0, 0, info.numSamples), std::memory_order_relaxed);
-    inputLevelInR.store (work.getRMSLevel (1, 0, info.numSamples), std::memory_order_relaxed);
+    inputLevelInL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
+    inputLevelInR.store (work.getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
     // ---- Input channel pre-FX ----
     juce::MidiBuffer inputMidi; // Input channel gets MIDI too
     inputChannel->processBlock (work, inputMidi);
 
     // ---- Measure output level (after FX) ----
-    inputLevelOutL.store (work.getRMSLevel (0, 0, info.numSamples), std::memory_order_relaxed);
-    inputLevelOutR.store (work.getRMSLevel (1, 0, info.numSamples), std::memory_order_relaxed);
+    inputLevelOutL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
+    inputLevelOutR.store (work.getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
     // ---- Save post-input-FX signal for direct mix ----
     juce::AudioBuffer<float> directSignal;
@@ -831,7 +869,9 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         {
             channelOutputs[i].setSize (2, info.numSamples, false, false, true);
 
-            bool shouldProcess = parallelRouting || (i == activeChannel);
+            bool isActive = parallelRouting || (i == activeChannel);
+            bool isFading = ! parallelRouting && channelFadeGain[i].isSmoothing();
+            bool shouldProcess = isActive || isFading;
 
             if (shouldProcess)
             {
@@ -844,11 +884,33 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
             }
 
             // Capture input levels (before FX)
-            channelInputLevelL[i].store (channelOutputs[i].getRMSLevel (0, 0, info.numSamples), std::memory_order_relaxed);
-            channelInputLevelR[i].store (channelOutputs[i].getRMSLevel (1, 0, info.numSamples), std::memory_order_relaxed);
+            channelInputLevelL[i].store (channelOutputs[i].getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
+            channelInputLevelR[i].store (channelOutputs[i].getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
-            if (shouldProcess)
-                channels[i]->processBlock (channelOutputs[i], midi);
+            {
+                juce::MidiBuffer channelMidi (midi);
+                if (shouldProcess)
+                {
+                    channels[i]->processBlock (channelOutputs[i], channelMidi);
+                }
+                else
+                {
+                    juce::AudioBuffer<float> silent (2, info.numSamples);
+                    silent.clear();
+                    channels[i]->processBlock (silent, channelMidi);
+                }
+            }
+
+            // Apply crossfade in single mode
+            if (! parallelRouting && shouldProcess)
+            {
+                for (int s = 0; s < info.numSamples; ++s)
+                {
+                    float g = channelFadeGain[i].getNextValue();
+                    for (int ch = 0; ch < 2; ++ch)
+                        channelOutputs[i].getWritePointer (ch)[s] *= g;
+                }
+            }
 
             // Solo/mute logic
             bool shouldMix = anySoloed ? channelSoloed[i] : !channelMuted[i];
@@ -875,28 +937,27 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     }
 
     // ---- Master input level (before FX bus) ----
-    masterLevelInL.store (work.getRMSLevel (0, 0, info.numSamples), std::memory_order_relaxed);
-    masterLevelInR.store (work.getRMSLevel (1, 0, info.numSamples), std::memory_order_relaxed);
+    masterLevelInL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
+    masterLevelInR.store (work.getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
     // ---- Master insert chain ----
-    fxBus->processBlock (work, info.numSamples);
-
-    // ---- Master output level (after FX bus) ----
-    masterLevelOutL.store (work.getRMSLevel (0, 0, info.numSamples), std::memory_order_relaxed);
-    masterLevelOutR.store (work.getRMSLevel (1, 0, info.numSamples), std::memory_order_relaxed);
+    {
+        juce::MidiBuffer fxMidi (midi);
+        fxBus->processBlock (work, info.numSamples, fxMidi);
+    }
 
     // ---- Channel level meters ----
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
-        channelLevelL[i].store (channelOutputs[i].getRMSLevel (0, 0, info.numSamples), std::memory_order_relaxed);
-        channelLevelR[i].store (channelOutputs[i].getRMSLevel (1, 0, info.numSamples), std::memory_order_relaxed);
+        channelLevelL[i].store (channelOutputs[i].getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
+        channelLevelR[i].store (channelOutputs[i].getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
     }
-
-    // ---- Metronome (mixed post-FX) ----
-    metronome.processBlock (work);
 
     // ---- Looper (captures and plays back master output) ----
     looper.processBlock (work);
+
+    // ---- Metronome (mixed after looper so clicks aren't recorded into loops) ----
+    metronome.processBlock (work);
 
     // ---- Wet capture ----
     recorder.writeOutputBlock (work);
@@ -905,6 +966,52 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     float mGain = masterOutputGain.load (std::memory_order_relaxed);
     if (std::abs (mGain - 1.0f) > 0.0001f)
         work.applyGain (0, info.numSamples, mGain);
+
+    // ---- Master output level (post FX + fader) ----
+    masterLevelOutL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
+    masterLevelOutR.store (work.getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
+
+    // ---- Stereo spread (mid/side energy) + goniometer ----
+    {
+        float midE = 0.0f, sideE = 0.0f;
+        const float* lPtr = work.getReadPointer (0);
+        const float* rPtr = work.getReadPointer (1);
+        for (int s = 0; s < info.numSamples; ++s)
+        {
+            float mid  = (lPtr[s] + rPtr[s]) * 0.5f;
+            float side = (lPtr[s] - rPtr[s]) * 0.5f;
+            midE  += mid * mid;
+            sideE += side * side;
+        }
+        masterStereoL.store (midE  / (float) info.numSamples, std::memory_order_relaxed);
+        masterStereoR.store (sideE / (float) info.numSamples, std::memory_order_relaxed);
+
+        if (fxBusPanel)
+            fxBusPanel->pushGoniometerSamples (lPtr, rPtr, info.numSamples);
+    }
+
+    // ---- Short-term LUFS approximation (~400ms window) ----
+    {
+        float sumSq = 0.0f;
+        for (int s = 0; s < info.numSamples; ++s)
+        {
+            float l = work.getReadPointer (0)[s];
+            float r = work.getReadPointer (1)[s];
+            sumSq += l * l + r * r;
+        }
+        lufsAccumulator += sumSq;
+        lufsSampleCount += info.numSamples;
+
+        int windowSamples = (int)(currentSampleRate * 0.4);
+        if (lufsSampleCount >= windowSamples)
+        {
+            float meanSq = lufsAccumulator / (float)(lufsSampleCount * 2);
+            float lufs = -0.691f + 10.0f * std::log10 (juce::jmax (1e-10f, meanSq));
+            masterLufsDb.store (lufs, std::memory_order_relaxed);
+            lufsAccumulator = 0.0f;
+            lufsSampleCount = 0;
+        }
+    }
 
     // ---- Write to ASIO output ----
     for (int ch = 0; ch < buffer->getNumChannels() && ch < 2; ++ch)
@@ -938,8 +1045,23 @@ void MainComponent::handleIncomingMidiMessage (juce::MidiInput*,
                                                const juce::MidiMessage& msg)
 {
     midiActivityFlag.store (true, std::memory_order_relaxed);
-    juce::ScopedLock sl (midiLock);
-    pendingMidi.addEvent (msg, 0);
+    {
+        juce::ScopedLock sl (midiLock);
+        pendingMidi.addEvent (msg, 0);
+    }
+
+    if (! msg.isMidiClock() && ! msg.isActiveSense())
+    {
+        auto copy = msg;
+        juce::MessageManager::callAsync ([this, copy]()
+        {
+            if (midiMonitorWindow != nullptr && midiMonitorWindow->isVisible())
+                midiMonitorWindow->addMessage (copy);
+
+            if (activeMidiRulesPanel != nullptr)
+                activeMidiRulesPanel->incomingMidiMessage (copy);
+        });
+    }
 }
 
 //==============================================================================
@@ -1225,11 +1347,133 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // Right-click on looper button — settings menu
+    if (e.mods.isRightButtonDown() && e.eventComponent == &loopRecButton)
+    {
+        juce::PopupMenu menu;
+
+        menu.addItem (1, "Clear Loop");
+        menu.addSeparator();
+
+        juce::PopupMenu countInMenu;
+        int curCI = looper.getCountInBeats();
+        countInMenu.addItem (10, "Off",    true, curCI == 0);
+        countInMenu.addItem (11, "2 beats", true, curCI == 2);
+        countInMenu.addItem (12, "4 beats", true, curCI == 4);
+        countInMenu.addItem (13, "8 beats", true, curCI == 8);
+        menu.addSubMenu ("Count-In", countInMenu);
+
+        juce::PopupMenu meterMenu;
+        int curNum = looper.getMeterNum();
+        int curDen = looper.getMeterDen();
+        meterMenu.addItem (20, "3/4", true, curNum == 3 && curDen == 4);
+        meterMenu.addItem (21, "4/4", true, curNum == 4 && curDen == 4);
+        meterMenu.addItem (22, "5/4", true, curNum == 5 && curDen == 4);
+        meterMenu.addItem (23, "6/8", true, curNum == 6 && curDen == 8);
+        meterMenu.addItem (24, "7/8", true, curNum == 7 && curDen == 8);
+        menu.addSubMenu ("Meter", meterMenu);
+
+        juce::PopupMenu barsMenu;
+        int curBars = looper.getLoopBars();
+        barsMenu.addItem (30, "Free",    true, curBars == 0);
+        barsMenu.addItem (31, "1 bar",   true, curBars == 1);
+        barsMenu.addItem (32, "2 bars",  true, curBars == 2);
+        barsMenu.addItem (33, "4 bars",  true, curBars == 4);
+        barsMenu.addItem (34, "8 bars",  true, curBars == 8);
+        barsMenu.addItem (35, "16 bars", true, curBars == 16);
+        menu.addSubMenu ("Loop Length", barsMenu);
+
+        menu.addSeparator();
+
+        juce::PopupMenu captureMenu;
+        auto curCap = looper.getCapturePoint();
+        captureMenu.addItem (40, "Output (post-FX)", true, curCap == Looper::CapturePoint::Output);
+        captureMenu.addItem (41, "Input (pre-FX)",   true, curCap == Looper::CapturePoint::Input);
+        menu.addSubMenu ("Capture", captureMenu);
+
+        menu.addSeparator();
+        menu.addItem (50, "Export Loop as WAV...", looper.getLoopLengthSamples() > 0);
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loopRecButton),
+            [this] (int result)
+            {
+                if (result == 1)  { looper.clear(); return; }
+
+                if (result == 10) looper.setCountInBeats (0);
+                if (result == 11) looper.setCountInBeats (2);
+                if (result == 12) looper.setCountInBeats (4);
+                if (result == 13) looper.setCountInBeats (8);
+
+                if (result == 20) looper.setMeter (3, 4);
+                if (result == 21) looper.setMeter (4, 4);
+                if (result == 22) looper.setMeter (5, 4);
+                if (result == 23) looper.setMeter (6, 8);
+                if (result == 24) looper.setMeter (7, 8);
+
+                if (result == 30) looper.setLoopBars (0);
+                if (result == 31) looper.setLoopBars (1);
+                if (result == 32) looper.setLoopBars (2);
+                if (result == 33) looper.setLoopBars (4);
+                if (result == 34) looper.setLoopBars (8);
+                if (result == 35) looper.setLoopBars (16);
+
+                if (result == 40) looper.setCapturePoint (Looper::CapturePoint::Output);
+                if (result == 41) looper.setCapturePoint (Looper::CapturePoint::Input);
+
+                if (result == 50)
+                {
+                    auto defaultFolder = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("UpStage Recordings");
+                    defaultFolder.createDirectory();
+
+                    auto now = juce::Time::getCurrentTime();
+                    auto defaultName = "UpStage_Loop_" + now.formatted ("%Y%m%d_%H%M%S") + ".wav";
+
+                    fileChooser = std::make_unique<juce::FileChooser> (
+                        "Export Loop", defaultFolder.getChildFile (defaultName), "*.wav");
+
+                    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode
+                        | juce::FileBrowserComponent::canSelectFiles,
+                        [this] (const juce::FileChooser& fc)
+                        {
+                            auto file = fc.getResult();
+                            if (file != juce::File())
+                            {
+                                if (looper.exportToFile (file))
+                                    file.revealToUser();
+                            }
+                        });
+                }
+            });
+        return;
+    }
+
     // Right-click on metronome button — open settings
     if (e.mods.isRightButtonDown() && e.eventComponent == &metronomeButton)
     {
         showMetronomeSettings();
         return;
+    }
+
+    // Click on MIDI LED — toggle MIDI monitor window
+    if (e.eventComponent == &midiLedLabel)
+    {
+        if (midiMonitorWindow == nullptr)
+            midiMonitorWindow = std::make_unique<MidiMonitorWindow>();
+
+        midiMonitorWindow->setVisible (! midiMonitorWindow->isVisible());
+        if (midiMonitorWindow->isVisible())
+            midiMonitorWindow->toFront (true);
+        return;
+    }
+}
+
+void MainComponent::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &loopRecButton)
+    {
+        looper.setBPM (tapTempo.getBPM());
+        looper.startOverdub();
     }
 }
 
@@ -1494,14 +1738,23 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    // Numpad 1-8 = Scene recall (with + held: switch channel 1-4 instead)
+    // Numpad 9 = prefix key for channel switching
+    if (key.getKeyCode() == juce::KeyPress::numberPad9)
+    {
+        numpad9Prefix = true;
+        return true;
+    }
+
+    // Numpad 1-8: after Numpad 9 prefix, 1-4 switches channel; otherwise recall scene
     for (int n = 1; n <= 8; ++n)
     {
         if (key.getKeyCode() == juce::KeyPress::numberPad0 + n)
         {
-            if (numpadPlusHeld && n >= 1 && n <= NUM_CHANNELS)
+            if (numpad9Prefix)
             {
-                setActiveChannel (n - 1);
+                numpad9Prefix = false;
+                if (n >= 1 && n <= NUM_CHANNELS)
+                    setActiveChannel (n - 1);
             }
             else
             {
@@ -1548,20 +1801,11 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         }
     }
 
-    // Numpad + held flag
-    if (key.getKeyCode() == juce::KeyPress::numberPadAdd)
-    {
-        numpadPlusHeld = true;
-        return true;
-    }
-
     return false;
 }
 
-bool MainComponent::keyStateChanged (bool isKeyDown)
+bool MainComponent::keyStateChanged (bool /*isKeyDown*/)
 {
-    if (! isKeyDown && ! juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::numberPadAdd))
-        numpadPlusHeld = false;
     return false;
 }
 
@@ -1659,11 +1903,8 @@ void MainComponent::resized()
             scenesRow.removeFromLeft (3);
     }
 
-    // Signal chain view
-    signalChainView.setBounds (area.removeFromBottom (SignalChainView::preferredHeight()));
-
-    // Status bar at bottom
-    auto statusArea = area.removeFromBottom (24);
+    // Footer status bar
+    auto statusArea = area.removeFromBottom (22);
     ramLabel.setBounds (statusArea.removeFromRight (90).reduced (4, 2));
     cpuLabel.setBounds (statusArea.removeFromRight (90).reduced (4, 2));
     statusStateLabel.setBounds (statusArea.removeFromRight (200).reduced (4, 2));
@@ -1885,19 +2126,27 @@ void MainComponent::buttonClicked (juce::Button* b)
             metronome.isEnabled() ? juce::Colour (0xff4444aa) : juce::Colour (0xff2a2a3a));
     }
 
-    // Looper
+    // Looper — single click: record (first layer) / play-stop / finish recording
     else if (b == &loopRecButton)
     {
-        looper.toggleRecord();
+        looper.setBPM (tapTempo.getBPM());
         auto ls = looper.getState();
-        if (ls == Looper::State::Recording)
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff882222));
-        else if (ls == Looper::State::Playing)
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff228822));
-        else if (ls == Looper::State::Overdubbing)
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff886622));
+
+        if (ls == Looper::State::Idle)
+        {
+            if (looper.getLoopLengthSamples() > 0)
+                looper.togglePlayStop();
+            else
+                looper.toggleRecord();
+        }
+        else if (ls == Looper::State::Recording || ls == Looper::State::CountIn)
+        {
+            looper.toggleRecord();
+        }
         else
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
+        {
+            looper.togglePlayStop();
+        }
     }
 
     // Routing mode
@@ -2030,8 +2279,13 @@ void MainComponent::timerCallback()
 
     // Update master bus meters
     if (fxBusPanel)
+    {
         fxBusPanel->pushMeterLevels (masterLevelInL.load(), masterLevelInR.load(),
                                      masterLevelOutL.load(), masterLevelOutR.load());
+        fxBusPanel->pushStereo (masterStereoL.load(), masterStereoR.load());
+        fxBusPanel->pushLufs (masterLufsDb.load());
+    }
+
 
     // Metronome beat flash
     if (metronome.isEnabled() && metronome.consumeBeatFlash())
@@ -2049,30 +2303,63 @@ void MainComponent::timerCallback()
     // Looper visual feedback
     {
         auto ls = looper.getState();
+        double bpm = tapTempo.getBPM();
+        int meterNum = looper.getMeterNum();
+        auto secsToBarBeat = [&] (double secs) -> juce::String
+        {
+            if (bpm <= 0.0) return juce::String (secs, 1) + "s";
+            double totalBeats = secs * bpm / 60.0;
+            int bar  = (int)(totalBeats / meterNum) + 1;
+            int beat = (int)(std::fmod (totalBeats, (double) meterNum)) + 1;
+            return juce::String (bar) + "." + juce::String (beat);
+        };
+
         if (ls == Looper::State::Idle)
         {
             looperProgressLabel.setText ("", juce::dontSendNotification);
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x00000000));
+            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
+        }
+        else if (ls == Looper::State::CountIn)
+        {
+            double secs = -looper.getElapsedSeconds();
+            double beatsLeft = secs * bpm / 60.0;
+            int beatsInt = (int) std::ceil (beatsLeft);
+            looperProgressLabel.setText ("-" + juce::String (beatsInt), juce::dontSendNotification);
+            bool flash = (looperFlashCounter++ / 4) % 2 == 0;
+            looperProgressLabel.setColour (juce::Label::textColourId,
+                flash ? juce::Colour (0xffffcc44) : juce::Colour (0xffaa8822));
+            looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x30ffaa00));
+            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff886622));
         }
         else if (ls == Looper::State::Recording)
         {
             double elapsed = looper.getElapsedSeconds();
-            looperProgressLabel.setText (juce::String (elapsed, 1) + "s", juce::dontSendNotification);
+            looperProgressLabel.setText (secsToBarBeat (elapsed), juce::dontSendNotification);
             bool flash = (looperFlashCounter++ / 4) % 2 == 0;
             looperProgressLabel.setColour (juce::Label::textColourId,
                 flash ? juce::Colour (0xffff4444) : juce::Colour (0xffaa2222));
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x30ff0000));
+            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff882222));
         }
         else
         {
             double pos = looper.getPositionNormalised();
-            double len = looper.getLoopLengthSeconds();
-            int pct = (int) (pos * 100.0);
-            looperProgressLabel.setText (juce::String (pct) + "% / " + juce::String (len, 1) + "s",
-                                        juce::dontSendNotification);
+            double lenSecs = looper.getLoopLengthSeconds();
+            double posSecs = pos * lenSecs;
+            juce::String posStr = secsToBarBeat (posSecs) + "/" + secsToBarBeat (lenSecs);
+            looperProgressLabel.setText (posStr, juce::dontSendNotification);
+            bool isDubbing  = (ls == Looper::State::Overdubbing);
+            bool isPending  = (ls == Looper::State::OverdubPending);
             looperProgressLabel.setColour (juce::Label::textColourId,
-                ls == Looper::State::Overdubbing ? juce::Colour (0xffccaa44) : juce::Colour (0xff88cc88));
+                isDubbing ? juce::Colour (0xffccaa44)
+                : isPending ? juce::Colour (0xffaaaa44)
+                : juce::Colour (0xff88cc88));
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x00000000));
+            loopRecButton.setColour (juce::TextButton::buttonColourId,
+                isDubbing ? juce::Colour (0xff886622)
+                : isPending ? juce::Colour (0xff666622)
+                : juce::Colour (0xff228822));
         }
     }
 
@@ -2252,14 +2539,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int idx, const juce::String&)
         m.addItem (MenuMidiRules,     "MIDI Rules...");
         m.addSeparator();
 
-        // MIDI Input submenu
+        // MIDI Input submenu (toggle each device on/off)
         {
             juce::PopupMenu midiInMenu;
             auto inputs = juce::MidiInput::getAvailableDevices();
-            midiInMenu.addItem (MenuMidiInBase, "(None)", true, activeMidiInputId.isEmpty());
             for (int i = 0; i < inputs.size(); ++i)
                 midiInMenu.addItem (MenuMidiInBase + 1 + i, inputs[i].name,
-                                    true, inputs[i].identifier == activeMidiInputId);
+                                    true, deviceManager.isMidiInputDeviceEnabled (inputs[i].identifier));
+            if (inputs.isEmpty())
+                midiInMenu.addItem (MenuMidiInBase, "(No devices)", false);
             m.addSubMenu ("MIDI Input", midiInMenu);
         }
 
@@ -2308,31 +2596,26 @@ void MainComponent::menuItemSelected (int id, int)
         default:
             if (id >= MenuRecentBase && id < MenuRecentBase + 10)
                 openRecentProject (id - MenuRecentBase);
-            else if (id >= MenuMidiInBase && id < MenuMidiOutBase)
+            else if (id > MenuMidiInBase && id < MenuMidiOutBase)
             {
-                if (activeMidiInputId.isNotEmpty())
+                auto inputs = juce::MidiInput::getAvailableDevices();
+                int idx = id - MenuMidiInBase - 1;
+                if (juce::isPositiveAndBelow (idx, inputs.size()))
                 {
-                    deviceManager.removeMidiInputDeviceCallback (activeMidiInputId, this);
-                    deviceManager.setMidiInputDeviceEnabled (activeMidiInputId, false);
-                }
+                    auto devId = inputs[idx].identifier;
+                    bool wasEnabled = deviceManager.isMidiInputDeviceEnabled (devId);
 
-                if (id == MenuMidiInBase)
-                {
-                    activeMidiInputId = {};
-                }
-                else
-                {
-                    auto inputs = juce::MidiInput::getAvailableDevices();
-                    int idx = id - MenuMidiInBase - 1;
-                    if (juce::isPositiveAndBelow (idx, inputs.size()))
+                    if (wasEnabled)
                     {
-                        activeMidiInputId = inputs[idx].identifier;
-                        deviceManager.addMidiInputDeviceCallback (activeMidiInputId, this);
-                        deviceManager.setMidiInputDeviceEnabled (activeMidiInputId, true);
+                        deviceManager.setMidiInputDeviceEnabled (devId, false);
+                        deviceManager.removeMidiInputDeviceCallback (devId, this);
+                    }
+                    else
+                    {
+                        deviceManager.setMidiInputDeviceEnabled (devId, true);
+                        deviceManager.addMidiInputDeviceCallback (devId, this);
                     }
                 }
-                currentProject.midiInputDevice = activeMidiInputId;
-                projectDirty = true;
             }
             else if (id >= MenuMidiOutBase)
             {
@@ -2436,6 +2719,10 @@ void MainComponent::loadProjectData (const ProjectData& data)
 {
     currentProject = data;
     setActiveChannel (data.activeChannel);
+    parallelRouting = data.parallelRouting;
+    routingModeButton.setButtonText (parallelRouting ? ">>" : ">");
+    routingModeButton.setColour (juce::TextButton::buttonColourId,
+        parallelRouting ? juce::Colour (0xff2a3a3a) : juce::Colour (0xff3a3a2a));
     midiTranslator.setRules (data.midiRules);
     tapTempo.setBPM (data.tapTempoBPM);
 
@@ -2633,8 +2920,9 @@ void MainComponent::loadProjectData (const ProjectData& data)
 ProjectData MainComponent::collectProjectData() const
 {
     ProjectData data = currentProject;
-    data.activeChannel  = activeChannel;
-    data.inputTrimDb    = (float) inputTrimSlider.getValue();
+    data.activeChannel   = activeChannel;
+    data.parallelRouting = parallelRouting;
+    data.inputTrimDb     = (float) inputTrimSlider.getValue();
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
         data.channels[i] = channels[i]->getState();
@@ -2744,9 +3032,12 @@ void MainComponent::setActiveChannel (int idx)
     if (! juce::isPositiveAndBelow (idx, NUM_CHANNELS)) return;
     activeChannel = idx;
     for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
         channels[i]->setActive (i == idx);
+        channelFadeGain[i].setTargetValue (i == idx ? 1.0f : 0.0f);
+    }
     updateActiveIndicators();
-    updateStatusBar();  // This will update the signal chain view too
+    updateStatusBar();
 }
 
 void MainComponent::sendMidiPanic()
@@ -3118,18 +3409,20 @@ void MainComponent::showPluginManager()
 void MainComponent::showMidiRulesEditor()
 {
     auto* panel = new MidiRulesPanel (midiTranslator.getRules());
+    activeMidiRulesPanel = panel;
 
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned (panel);
     opts.dialogTitle            = "MIDI Rules";
-    opts.dialogBackgroundColour = juce::Colour (0xff1e1e1e);
-    opts.useNativeTitleBar      = true;
+    opts.dialogBackgroundColour = juce::Colour (0xff1a1a2a);
+    opts.useNativeTitleBar      = false;
     opts.resizable              = true;
     opts.escapeKeyTriggersCloseButton = true;
 
     panel->onClose = [this, panel]
     {
         midiTranslator.setRules (panel->getRules());
+        activeMidiRulesPanel = nullptr;
         projectDirty = true;
     };
     opts.launchAsync();
@@ -3268,7 +3561,12 @@ void MainComponent::updateStatusBar()
     }
 
     auto ls = looper.getState();
-    if (ls == Looper::State::Recording)
+    if (ls == Looper::State::CountIn)
+    {
+        stateStr << "[LOOP COUNT-IN]";
+        stateColour = juce::Colour (0xffffaa44);
+    }
+    else if (ls == Looper::State::Recording)
     {
         stateStr << "[LOOP REC]";
         stateColour = juce::Colour (0xffff4444);
@@ -3278,6 +3576,11 @@ void MainComponent::updateStatusBar()
         stateStr << "[LOOP PLAY]";
         if (stateColour == juce::Colour (0xff888888))
             stateColour = juce::Colour (0xffccaa44);
+    }
+    else if (ls == Looper::State::OverdubPending)
+    {
+        stateStr << "[LOOP DUB ARMED]";
+        stateColour = juce::Colour (0xffaaaa44);
     }
     else if (ls == Looper::State::Overdubbing)
     {
@@ -3304,7 +3607,7 @@ void MainComponent::showShortcutHelp()
     msg << "1-4                  Switch channel\n";
     msg << "Numpad 1-8       Recall scene\n";
     msg << "Numpad 0           Tap tempo\n";
-    msg << "Numpad+ hold    + 1-4 = switch channel\n\n";
+    msg << "Numpad 9, 1-4   Switch channel\n\n";
     msg << "Ctrl+S                Save project\n";
     msg << "Ctrl+O               Open project\n";
     msg << "Ctrl+N               New project\n";
@@ -3427,4 +3730,58 @@ void MainComponent::updateActiveIndicators()
         }
     }
     repaint();
+}
+
+//==============================================================================
+juce::File MainComponent::getSettingsFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("UpStage").getChildFile ("UpStage_settings.xml");
+}
+
+void MainComponent::saveAudioDeviceState()
+{
+    auto file = getSettingsFile();
+    file.getParentDirectory().createDirectory();
+
+    auto settingsXml = std::make_unique<juce::XmlElement> ("UpStageSettings");
+
+    if (auto deviceXml = deviceManager.createStateXml())
+        settingsXml->addChildElement (deviceXml.release());
+
+    if (auto* win = findParentComponentOfClass<juce::DocumentWindow>())
+    {
+        auto* boundsEl = settingsXml->createNewChildElement ("WindowBounds");
+        boundsEl->setAttribute ("x",      win->getX());
+        boundsEl->setAttribute ("y",      win->getY());
+        boundsEl->setAttribute ("width",  win->getWidth());
+        boundsEl->setAttribute ("height", win->getHeight());
+    }
+
+    settingsXml->writeTo (file);
+}
+
+void MainComponent::restoreAudioDeviceState()
+{
+    auto file = getSettingsFile();
+    if (! file.existsAsFile())
+        return;
+
+    if (auto xml = juce::XmlDocument::parse (file))
+    {
+        if (auto* deviceXml = xml->getChildByName ("DEVICESETUP"))
+            deviceManager.initialise (1, 2, deviceXml, true);
+
+        if (auto* boundsEl = xml->getChildByName ("WindowBounds"))
+        {
+            if (auto* win = findParentComponentOfClass<juce::DocumentWindow>())
+            {
+                int x = boundsEl->getIntAttribute ("x", win->getX());
+                int y = boundsEl->getIntAttribute ("y", win->getY());
+                int w = boundsEl->getIntAttribute ("width", win->getWidth());
+                int h = boundsEl->getIntAttribute ("height", win->getHeight());
+                win->setBounds (x, y, w, h);
+            }
+        }
+    }
 }

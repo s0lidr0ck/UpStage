@@ -49,13 +49,13 @@ void LevelMeter::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
-    // Beveled bezel around the meter
-    g.setColour (juce::Colour (0xff0a0a0a));
+    // Dark housing
+    g.setColour (juce::Colour (0xff1a1a1a));
     g.fillRoundedRectangle (bounds, 2.0f);
 
-    // Inner bevel highlight
-    g.setColour (juce::Colours::white.withAlpha (0.04f));
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 0.5f);
+    // Recessed shadow
+    g.setColour (juce::Colour (0xff080808));
+    g.fillRoundedRectangle (bounds.reduced (1.5f), 1.5f);
 
     auto area = bounds.reduced (2.0f);
 
@@ -73,6 +73,27 @@ void LevelMeter::paint (juce::Graphics& g)
     {
         paintBar (g, area, displayLeft, peakLeft);
     }
+
+    // Glass overlay
+    auto glassArea = bounds.reduced (2.0f);
+    {
+        juce::ColourGradient glass (
+            juce::Colour (0x18ffffff), glassArea.getCentreX(), glassArea.getY(),
+            juce::Colour (0x00ffffff), glassArea.getCentreX(), glassArea.getY() + glassArea.getHeight() * 0.3f, false);
+        g.setGradientFill (glass);
+        g.fillRect (glassArea);
+    }
+    {
+        juce::ColourGradient shadow (
+            juce::Colour (0x00000000), glassArea.getCentreX(), glassArea.getBottom() - glassArea.getHeight() * 0.2f,
+            juce::Colour (0x12000000), glassArea.getCentreX(), glassArea.getBottom(), false);
+        g.setGradientFill (shadow);
+        g.fillRect (glassArea);
+    }
+
+    // Edge highlight
+    g.setColour (juce::Colour (0x10ffffff));
+    g.drawRoundedRectangle (bounds.reduced (1.5f), 1.5f, 0.5f);
 }
 
 void LevelMeter::paintBar (juce::Graphics& g, juce::Rectangle<float> area,
@@ -89,10 +110,19 @@ void LevelMeter::paintBar (juce::Graphics& g, juce::Rectangle<float> area,
 
     float h = area.getHeight();
 
-    float redStart    = 1.0f - (3.0f  / 60.0f);
-    float yellowStart = 1.0f - (12.0f / 60.0f);
+    // dB-calibrated: 0dB = unity maps to ~83% height (matching fader 0dB position)
+    // Range: -60dB (bottom) to +12dB (top)
+    auto dbToNorm = [] (float lin) -> float
+    {
+        float db = juce::Decibels::gainToDecibels (lin, -60.0f);
+        db = juce::jlimit (-60.0f, 12.0f, db);
+        return (db + 60.0f) / 72.0f;
+    };
 
-    float filledH = level * h;
+    float redStart    = (60.0f - 3.0f)  / 72.0f;  // +3 dB
+    float yellowStart = (60.0f - 12.0f) / 72.0f;  // -6 dB
+
+    float filledH = dbToNorm (level) * h;
 
     // Main zone with horizontal gradient for 3D tube effect
     float mainH = juce::jmin (filledH, yellowStart * h);
@@ -161,7 +191,7 @@ void LevelMeter::paintBar (juce::Graphics& g, juce::Rectangle<float> area,
     // Peak hold line with glow
     if (peak > 0.01f)
     {
-        float peakY = area.getBottom() - peak * h;
+        float peakY = area.getBottom() - dbToNorm (peak) * h;
         juce::Colour peakCol = (peak > redStart) ? juce::Colour (0xffff5555)
                              : (peak > yellowStart) ? juce::Colour (0xffffffaa)
                              : juce::Colour (0xff88ff88);

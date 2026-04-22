@@ -25,7 +25,7 @@ public:
     void processBlock (juce::AudioBuffer<float>& buffer);
 
     //==========================================================================
-    bool  enabled       = true;
+    bool  enabled       = false;
     float thresholdDb   = -60.0f;
     float attackMs      = 5.0f;
     float holdMs        = 50.0f;

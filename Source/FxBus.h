@@ -44,6 +44,7 @@ public:
      * Process the master buffer through the insert chain in-place.
      */
     void processBlock (juce::AudioBuffer<float>& buffer, int numSamples);
+    void processBlock (juce::AudioBuffer<float>& buffer, int numSamples, juce::MidiBuffer& midi);
 
     //==========================================================================
     struct State

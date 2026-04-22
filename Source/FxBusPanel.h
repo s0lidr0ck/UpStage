@@ -2,6 +2,9 @@
 #include <JuceHeader.h>
 #include "FxBus.h"
 #include "LevelMeter.h"
+#include "VuMeter.h"
+#include "StereoSpreadMeter.h"
+#include "GoniometerMeter.h"
 
 class FxBusPanel : public juce::Component,
                    public juce::Slider::Listener
@@ -18,6 +21,9 @@ public:
     void syncFromBus();
 
     void pushMeterLevels (float inL, float inR, float outL, float outR);
+    void pushStereo (float left, float right);
+    void pushLufs (float lufsDb);
+    void pushGoniometerSamples (const float* leftData, const float* rightData, int numSamples);
     void setMasterFaderDb (float db);
 
     void paint   (juce::Graphics& g) override;
@@ -33,13 +39,15 @@ private:
     juce::ToggleButton bypassToggle { "Bypass" };
     juce::TextButton  addFxButton   { "+ Add Insert" };
 
-    juce::Slider  masterFader;
-    juce::Label   masterFaderLabel;
+    juce::Slider  masterKnob;
+    juce::Label   masterKnobLabel;
 
-    LevelMeter meterIn  { LevelMeter::Orientation::Vertical, LevelMeter::ColourMode::Amber };
-    LevelMeter meterOut { LevelMeter::Orientation::Vertical, LevelMeter::ColourMode::Green };
-    juce::Label meterInLabel;
-    juce::Label meterOutLabel;
+    VuMeter vuMeterIn  { VuMeter::Theme::Amber };
+    VuMeter vuMeterOut { VuMeter::Theme::Amber };
+    VuMeter peakMeter  { VuMeter::Theme::Black };
+    VuMeter lufsMeter  { VuMeter::Theme::Blue };
+    StereoSpreadMeter spreadMeter;
+    GoniometerMeter   goniometer;
 
     // Plugin slot display (painted, not child components)
     struct SlotInfo

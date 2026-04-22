@@ -7,7 +7,8 @@ bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data)
 {
     auto root = std::make_unique<juce::XmlElement> ("UpStageProject");
     root->setAttribute ("name",          data.projectName);
-    root->setAttribute ("activeChannel", data.activeChannel);
+    root->setAttribute ("activeChannel",  data.activeChannel);
+    root->setAttribute ("parallelRouting", data.parallelRouting);
     root->setAttribute ("version",       "1");
 
     // ---- Audio settings ----
@@ -89,8 +90,9 @@ bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data)
     if (root == nullptr || root->getTagName() != "UpStageProject")
         return false;
 
-    data.projectName   = root->getStringAttribute ("name", "Untitled");
-    data.activeChannel = root->getIntAttribute    ("activeChannel", 0);
+    data.projectName     = root->getStringAttribute ("name", "Untitled");
+    data.activeChannel   = root->getIntAttribute    ("activeChannel", 0);
+    data.parallelRouting = root->getBoolAttribute   ("parallelRouting", true);
 
     // ---- Audio ----
     if (auto* audio = root->getChildByName ("AudioSettings"))
@@ -279,6 +281,10 @@ juce::XmlElement* ProjectState::ruleToXml (const MidiRule& rule)
     el->setAttribute ("outNumber",  rule.outNumber);
     el->setAttribute ("outValue",   rule.outValue);
     el->setAttribute ("desc",       rule.description);
+    el->setAttribute ("mode",       modeToString (rule.mode));
+    el->setAttribute ("exprMin",    rule.exprMin);
+    el->setAttribute ("exprMax",    rule.exprMax);
+    el->setAttribute ("exprCurve",  curveToString (rule.exprCurve));
     return el;
 }
 
@@ -294,6 +300,10 @@ MidiRule ProjectState::xmlToRule (const juce::XmlElement* el)
     rule.outNumber  = el->getIntAttribute ("outNumber",  60);
     rule.outValue   = el->getIntAttribute ("outValue",  127);
     rule.description = el->getStringAttribute ("desc");
+    rule.mode       = stringToMode (el->getStringAttribute ("mode", "Normal"));
+    rule.exprMin    = el->getIntAttribute ("exprMin", 0);
+    rule.exprMax    = el->getIntAttribute ("exprMax", 127);
+    rule.exprCurve  = stringToCurve (el->getStringAttribute ("exprCurve", "Linear"));
     return rule;
 }
 
@@ -335,6 +345,40 @@ MidiRule::OutputType ProjectState::stringToOutputType (const juce::String& s)
     if (s == "PC")      return MidiRule::OutputType::PC;
     if (s == "NoteOff") return MidiRule::OutputType::NoteOff;
     return MidiRule::OutputType::NoteOn;
+}
+
+juce::String ProjectState::modeToString (MidiRule::Mode m)
+{
+    switch (m)
+    {
+        case MidiRule::Mode::Toggle:     return "Toggle";
+        case MidiRule::Mode::Expression: return "Expression";
+        default:                         return "Normal";
+    }
+}
+
+MidiRule::Mode ProjectState::stringToMode (const juce::String& s)
+{
+    if (s == "Toggle")     return MidiRule::Mode::Toggle;
+    if (s == "Expression") return MidiRule::Mode::Expression;
+    return MidiRule::Mode::Normal;
+}
+
+juce::String ProjectState::curveToString (MidiRule::Curve c)
+{
+    switch (c)
+    {
+        case MidiRule::Curve::Log: return "Log";
+        case MidiRule::Curve::Exp: return "Exp";
+        default:                   return "Linear";
+    }
+}
+
+MidiRule::Curve ProjectState::stringToCurve (const juce::String& s)
+{
+    if (s == "Log") return MidiRule::Curve::Log;
+    if (s == "Exp") return MidiRule::Curve::Exp;
+    return MidiRule::Curve::Linear;
 }
 
 //==============================================================================

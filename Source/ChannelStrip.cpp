@@ -218,6 +218,7 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
             if (entry->processor == nullptr) continue;
             if (entry->bypassed)             continue;
 
+            juce::MidiBuffer pluginMidi (midi);
             auto expected = entry->processor->getTotalNumInputChannels();
             if (expected > buffer.getNumChannels())
             {
@@ -225,13 +226,13 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
                 padded.clear();
                 for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                     padded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
-                entry->processor->processBlock (padded, midi);
+                entry->processor->processBlock (padded, pluginMidi);
                 for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                     buffer.copyFrom (ch, 0, padded, ch, 0, buffer.getNumSamples());
             }
             else
             {
-                entry->processor->processBlock (buffer, midi);
+                entry->processor->processBlock (buffer, pluginMidi);
             }
         }
     }

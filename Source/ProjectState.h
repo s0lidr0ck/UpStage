@@ -43,6 +43,8 @@ struct MidiRule
 {
     enum class InputType  { CC, PC, NoteOn, NoteOff };
     enum class OutputType { CC, PC, NoteOn, NoteOff };
+    enum class Mode       { Normal, Toggle, Expression };
+    enum class Curve      { Linear, Log, Exp };
 
     InputType   inType    = InputType::CC;
     int         inChannel = 0;    // 0 = any
@@ -54,6 +56,13 @@ struct MidiRule
     int         outNumber  = 60;
     int         outValue   = 127; // -1 = passthrough input value
 
+    Mode        mode       = Mode::Normal;
+
+    // Expression mode settings
+    int         exprMin    = 0;
+    int         exprMax    = 127;
+    Curve       exprCurve  = Curve::Linear;
+
     juce::String description;
 };
 
@@ -61,6 +70,7 @@ struct ProjectData
 {
     juce::String              projectName    = "Untitled";
     int                       activeChannel  = 0;
+    bool                      parallelRouting = true;
 
     // 4 channels
     ChannelState              channels[4];
@@ -140,12 +150,12 @@ public:
 
     // File dialogs moved to MainComponent (async API in JUCE 7+)
 
+    static juce::XmlElement* ruleToXml (const MidiRule& rule);
+    static MidiRule          xmlToRule (const juce::XmlElement* el);
+
 private:
     juce::XmlElement* channelToXml   (const ChannelState& ch, int index);
     bool              xmlToChannel   (const juce::XmlElement* el, ChannelState& ch);
-
-    juce::XmlElement* ruleToXml (const MidiRule& rule);
-    MidiRule          xmlToRule (const juce::XmlElement* el);
 
     juce::XmlElement* fxBusStateToXml (const ProjectData::FxBusState& state);
     bool              xmlToFxBusState  (const juce::XmlElement* el,
@@ -155,4 +165,9 @@ private:
     static juce::String outputTypeToString (MidiRule::OutputType t);
     static MidiRule::InputType  stringToInputType  (const juce::String& s);
     static MidiRule::OutputType stringToOutputType (const juce::String& s);
+
+    static juce::String modeToString   (MidiRule::Mode  m);
+    static MidiRule::Mode stringToMode (const juce::String& s);
+    static juce::String curveToString   (MidiRule::Curve c);
+    static MidiRule::Curve stringToCurve (const juce::String& s);
 };

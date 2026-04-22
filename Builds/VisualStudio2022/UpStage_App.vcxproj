@@ -158,6 +158,8 @@
     <ClCompile Include="..\..\Source\SetlistPanel.cpp"/>
     <ClCompile Include="..\..\Source\SceneManager.cpp"/>
     <ClCompile Include="..\..\Source\TapTempo.cpp"/>
+    <ClCompile Include="..\..\Source\Metronome.cpp"/>
+    <ClCompile Include="..\..\Source\Looper.cpp"/>
     <ClCompile Include="..\..\Source\TunerPanel.cpp"/>
     <ClCompile Include="..\..\Source\LevelMeter.cpp"/>
     <ClCompile Include="..\..\Source\NoiseGate.cpp"/>
@@ -2921,6 +2923,8 @@
     <ClInclude Include="..\..\Source\SetlistPanel.h"/>
     <ClInclude Include="..\..\Source\SceneManager.h"/>
     <ClInclude Include="..\..\Source\TapTempo.h"/>
+    <ClInclude Include="..\..\Source\Metronome.h"/>
+    <ClInclude Include="..\..\Source\Looper.h"/>
     <ClInclude Include="..\..\Source\TunerPanel.h"/>
     <ClInclude Include="..\..\Source\LevelMeter.h"/>
     <ClInclude Include="..\..\Source\NoiseGate.h"/>
