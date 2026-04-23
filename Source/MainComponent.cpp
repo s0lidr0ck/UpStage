@@ -719,6 +719,7 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
 {
+    juce::ScopedNoDenormals noDenormals;
     auto* buffer = info.buffer;
 
     // ---- Build working stereo buffer ----

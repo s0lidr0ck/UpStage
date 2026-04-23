@@ -27,7 +27,36 @@ public:
 
     void systemRequestedQuit() override
     {
-        // TODO: prompt save-unsaved-project dialog before quitting
+        if (mainWindow != nullptr)
+        {
+            if (auto* mc = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+            {
+                if (mc->isProjectDirty())
+                {
+                    auto options = juce::MessageBoxOptions()
+                        .withTitle ("Unsaved Changes")
+                        .withMessage ("You have unsaved changes. Save before quitting?")
+                        .withButton ("Save")
+                        .withButton ("Don't Save")
+                        .withButton ("Cancel");
+
+                    juce::AlertWindow::showAsync (options, [this] (int result)
+                    {
+                        if (result == 1)
+                        {
+                            if (auto* mc2 = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+                                mc2->saveProject();
+                            quit();
+                        }
+                        else if (result == 2)
+                        {
+                            quit();
+                        }
+                    });
+                    return;
+                }
+            }
+        }
         quit();
     }
 

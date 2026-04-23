@@ -71,6 +71,7 @@ private:
 
     double clickPhase    = 0.0;
     double clickPhaseInc = 0.0;
+    juce::Random noiseRng;
 
     void recalcTiming();
     float generateClickSample();

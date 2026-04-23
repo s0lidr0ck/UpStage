@@ -48,7 +48,7 @@ float Metronome::generateClickSample()
         case ClickSound::Tick:
         {
             sample = std::sin ((float) clickPhase);
-            float noise = (float)(std::rand() % 1000) / 1000.0f * 2.0f - 1.0f;
+            float noise = noiseRng.nextFloat() * 2.0f - 1.0f;
             sample = sample * 0.6f + noise * 0.4f;
             break;
         }

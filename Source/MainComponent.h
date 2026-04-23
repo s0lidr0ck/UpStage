@@ -106,6 +106,7 @@ public:
     void openProject();
     void saveProject();
     void saveProjectAs();
+    bool isProjectDirty() const { return projectDirty; }
     void loadProjectData (const ProjectData& data);
     ProjectData collectProjectData() const;
 

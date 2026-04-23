@@ -86,12 +86,9 @@ void Looper::finishRecording()
 
 void Looper::feedInput (const juce::AudioBuffer<float>& buf, int numSamples)
 {
-    auto s = state.load();
-    if (s != State::Recording && s != State::CountIn)
+    if (state.load() != State::Recording)
         return;
     if (capturePoint.load() != CapturePoint::Input)
-        return;
-    if (s != State::Recording)
         return;
 
     const int numCh = juce::jmin (buf.getNumChannels(), inputCapture.getNumChannels());

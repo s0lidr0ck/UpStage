@@ -38,7 +38,7 @@ public:
 
     //==========================================================================
     // Navigation
-    bool            canAdvance()  const { return currentIndex < songs.size() - 1; }
+    bool            canAdvance()  const { return ! songs.isEmpty() && currentIndex < songs.size() - 1; }
     bool            canGoBack()   const { return currentIndex > 0; }
     void            advance();
     void            previous();
