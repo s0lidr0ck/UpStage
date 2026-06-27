@@ -620,6 +620,13 @@ public:
             return;
         }
 
+        // ---- Recessed LCD readout (dB / value displays) ----
+        if (label.getComponentID() == "readout")
+        {
+            drawReadoutLabel (g, label);
+            return;
+        }
+
         auto bounds = label.getLocalBounds().toFloat();
         auto bgColour = label.findColour (juce::Label::backgroundColourId);
 
@@ -720,6 +727,44 @@ public:
             case ':': { static const uint8_t g[5]={0x00,0x36,0x36,0x00,0x00}; return g; }
             default:  return (ch > 32 ? box : blank);
         }
+    }
+
+    //==========================================================================
+    // Recessed LCD value readout: a screen set into the panel with a faint
+    // backlight glow, the value rendered in a glowing LCD tint.
+    void drawReadoutLabel (juce::Graphics& g, juce::Label& label)
+    {
+        auto full = label.getLocalBounds().toFloat();
+        auto lcd  = label.findColour (juce::Label::textColourId);
+
+        // Recess walls: dark cutout, top/left shadow, bottom/right catch-light.
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.fillRoundedRectangle (full, 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.85f));
+        g.drawLine (full.getX() + 1.5f, full.getY() + 1.0f, full.getRight() - 1.5f, full.getY() + 1.0f, 1.4f);
+        g.drawLine (full.getX() + 1.0f, full.getY() + 1.5f, full.getX() + 1.0f, full.getBottom() - 1.5f, 1.4f);
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.drawLine (full.getX() + 1.5f, full.getBottom() - 0.5f, full.getRight() - 1.5f, full.getBottom() - 0.5f, 1.0f);
+
+        // Dark screen substrate with a faint centre backlight in the LCD colour.
+        auto screen = full.reduced (2.0f);
+        g.setColour (juce::Colour (0xff0b0e0c));
+        g.fillRoundedRectangle (screen, 2.0f);
+        g.setGradientFill (juce::ColourGradient (lcd.withAlpha (0.10f), screen.getCentreX(), screen.getCentreY(),
+                                                 lcd.withAlpha (0.0f),  screen.getX(), screen.getCentreY(), true));
+        g.fillRoundedRectangle (screen, 2.0f);
+
+        // Value text, glowing slightly.
+        auto textArea = full.reduced (4.0f, 0.0f).toNearestInt();
+        g.setFont (label.getFont());
+        g.setColour (lcd.withAlpha (0.25f));   // soft bloom
+        g.drawText (label.getText(), textArea.translated (0, 0), label.getJustificationType(), false);
+        g.setColour (lcd);
+        g.drawText (label.getText(), textArea, label.getJustificationType(), false);
+
+        // Thin bezel rim.
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.drawRoundedRectangle (screen, 2.0f, 0.8f);
     }
 
     //==========================================================================

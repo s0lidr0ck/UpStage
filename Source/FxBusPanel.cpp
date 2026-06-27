@@ -45,8 +45,9 @@ FxBusPanel::FxBusPanel (FxBus& b)
 
     masterKnobLabel.setText ("0.0 dB", juce::dontSendNotification);
     masterKnobLabel.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+    masterKnobLabel.setComponentID ("readout");   // recessed LCD readout
     masterKnobLabel.setJustificationType (juce::Justification::centred);
-    masterKnobLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaaaaaa));
+    masterKnobLabel.setColour (juce::Label::textColourId, juce::Colour (0xffd8bff0));  // soft purple LCD
     masterKnobLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
     masterKnobLabel.setColour (juce::Label::outlineColourId, juce::Colour (0xff333333));
     masterKnobLabel.setEditable (false, true, false);
