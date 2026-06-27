@@ -1309,7 +1309,9 @@ void MainComponent::paint (juce::Graphics& g)
     }
 
     // ---- Channel strip backgrounds ----
-    const int mixerTop = 104;
+    // Strips begin below the scene-button row: menu(28)+songbar(34)+
+    // transport(48)+scenes(28) = 138. (Using 104 drew them up behind the scenes.)
+    const int mixerTop = 138;
     const int statusBottom = getHeight() - 24;
     const int totalChannels = NUM_CHANNELS + 2;
     const int stripWidth = getWidth() / totalChannels;
@@ -1352,44 +1354,6 @@ void MainComponent::paint (juce::Graphics& g)
 
         g.setColour (juce::Colours::white.withAlpha (0.045f));
         g.drawVerticalLine ((int)x + 1, (float)mixerTop, (float)statusBottom);
-    }
-
-    // ---- 500-series rack screws on the rails between strips ----
-    {
-        auto drawScrew = [&g] (float cx, float cy)
-        {
-            const float rad = 3.4f;
-            // Countersink pit.
-            g.setColour (juce::Colours::black.withAlpha (0.55f));
-            g.fillEllipse (cx - rad - 1.0f, cy - rad - 1.0f, (rad + 1.0f) * 2.0f, (rad + 1.0f) * 2.0f);
-            // Top-lit metal head.
-            juce::ColourGradient head (juce::Colour (0xff6a665e), cx, cy - rad,
-                                       juce::Colour (0xff2a2724), cx, cy + rad, false);
-            head.addColour (0.5, juce::Colour (0xff48443e));
-            g.setGradientFill (head);
-            g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.6f));
-            g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.7f);
-            // Slot-head groove (single, slightly angled).
-            auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (35.0f), cx, cy);
-            const float s = rad * 0.72f;
-            juce::Point<float> p1 (cx - s, cy), p2 (cx + s, cy);
-            p1.applyTransform (rot); p2.applyTransform (rot);
-            g.setColour (juce::Colours::black.withAlpha (0.6f));
-            g.drawLine ({ p1, p2 }, 1.1f);
-            // Upper-left highlight catch.
-            g.setColour (juce::Colours::white.withAlpha (0.22f));
-            g.fillEllipse (cx - rad * 0.5f, cy - rad * 0.6f, rad * 0.5f, rad * 0.5f);
-        };
-
-        const float topY = (float) mixerTop + 9.0f;
-        const float botY = (float) statusBottom - 9.0f;
-        for (int i = 1; i < totalChannels; ++i)
-        {
-            float x = (float)(stripWidth * i);
-            drawScrew (x, topY);
-            drawScrew (x, botY);
-        }
     }
 
     // ---- Mute overlays on channel strips ----
@@ -1518,6 +1482,49 @@ void MainComponent::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white.withAlpha (0.03f));
         g.drawHorizontalLine (statusBottom + 1, 0.0f, w);
     }
+}
+
+void MainComponent::paintOverChildren (juce::Graphics& g)
+{
+    // ---- Faceplate screws flanking each fader (drawn over the strips) ----
+    auto drawScrew = [&g] (float cx, float cy)
+    {
+        const float rad = 6.0f;
+        // Countersink pit.
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillEllipse (cx - rad - 1.5f, cy - rad - 1.5f, (rad + 1.5f) * 2.0f, (rad + 1.5f) * 2.0f);
+        // Top-lit metal head.
+        juce::ColourGradient head (juce::Colour (0xff6e6a62), cx, cy - rad,
+                                   juce::Colour (0xff2a2724), cx, cy + rad, false);
+        head.addColour (0.5, juce::Colour (0xff4a463f));
+        g.setGradientFill (head);
+        g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.8f);
+        // Slot-head groove (single, slightly angled).
+        auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (35.0f), cx, cy);
+        const float s = rad * 0.72f;
+        juce::Point<float> p1 (cx - s, cy), p2 (cx + s, cy);
+        p1.applyTransform (rot); p2.applyTransform (rot);
+        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        g.drawLine ({ p1, p2 }, 1.6f);
+        // Upper-left highlight catch.
+        g.setColour (juce::Colours::white.withAlpha (0.22f));
+        g.fillEllipse (cx - rad * 0.5f, cy - rad * 0.6f, rad * 0.6f, rad * 0.6f);
+    };
+
+    // A pair of screws above and below each fader, centred on its column.
+    auto screwsForFader = [&] (const juce::Component& fader)
+    {
+        auto b = fader.getBounds().toFloat();
+        float cx = b.getCentreX();
+        drawScrew (cx, b.getY() - 7.0f);        // above the fader travel
+        drawScrew (cx, b.getBottom() + 7.0f);   // below the fader travel
+    };
+
+    screwsForFader (inputStripFader);
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+        screwsForFader (outputFaders[i]);
 }
 
 void MainComponent::mouseDown (const juce::MouseEvent& e)

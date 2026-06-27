@@ -77,6 +77,7 @@ public:
 
     // Component
     void paint  (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;  // faceplate screws on top of strips
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
