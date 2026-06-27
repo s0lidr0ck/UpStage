@@ -1,9 +1,12 @@
 #include "ProjectState.h"
+#include "SceneManager.h"
+#include "MidiLearnManager.h"
 
 ProjectState::ProjectState() {}
 
 //==============================================================================
-bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data)
+bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data,
+                               SceneManager* scenes, MidiLearnManager* midiLearn)
 {
     auto root = std::make_unique<juce::XmlElement> ("UpStageProject");
     root->setAttribute ("name",          data.projectName);
@@ -54,6 +57,10 @@ bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data)
     // ---- Input trim ----
     root->setAttribute ("inputTrimDb", data.inputTrimDb);
 
+    // ---- Tap tempo ----
+    root->setAttribute ("tapTempoBPM",          data.tapTempoBPM);
+    root->setAttribute ("tapTempoClockEnabled", data.tapTempoClockEnabled ? 1 : 0);
+
     // ---- Gate ----
     auto* gateEl = root->createNewChildElement ("Gate");
     gateEl->setAttribute ("enabled",   data.gateEnabled ? 1 : 0);
@@ -64,6 +71,10 @@ bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data)
 
     // ---- FX Bus ----
     root->addChildElement (fxBusStateToXml (data.fxBusState));
+
+    // ---- Setlist ----
+    if (data.setlistFilePath.isNotEmpty())
+        root->setAttribute ("setlistFilePath", data.setlistFilePath);
 
     // ---- Knob Colors ----
     if (! data.knobColorMap.empty())
@@ -77,11 +88,18 @@ bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data)
         }
     }
 
+    // Scenes and MIDI learn
+    if (scenes != nullptr)
+        scenes->saveToXml (*root);
+    if (midiLearn != nullptr)
+        midiLearn->saveToXml (*root);
+
     return root->writeTo (file);
 }
 
 //==============================================================================
-bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data)
+bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data,
+                                 SceneManager* scenes, MidiLearnManager* midiLearn)
 {
     if (! file.existsAsFile())
         return false;
@@ -156,6 +174,10 @@ bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data)
     // ---- Input trim ----
     data.inputTrimDb = (float) root->getDoubleAttribute ("inputTrimDb", 0.0);
 
+    // ---- Tap tempo ----
+    data.tapTempoBPM          = root->getDoubleAttribute ("tapTempoBPM", 120.0);
+    data.tapTempoClockEnabled = root->getIntAttribute ("tapTempoClockEnabled", 0) != 0;
+
     // ---- Gate ----
     if (auto* gateEl = root->getChildByName ("Gate"))
     {
@@ -170,6 +192,9 @@ bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data)
     if (auto* fxEl = root->getChildByName ("FxBus"))
         xmlToFxBusState (fxEl, data.fxBusState);
 
+    // ---- Setlist ----
+    data.setlistFilePath = root->getStringAttribute ("setlistFilePath");
+
     // ---- Knob Colors ----
     data.knobColorMap.clear();
     if (auto* colorsEl = root->getChildByName ("KnobColors"))
@@ -182,6 +207,12 @@ bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data)
                 data.knobColorMap[id] = color;
         }
     }
+
+    // Scenes and MIDI learn
+    if (scenes != nullptr)
+        scenes->loadFromXml (*root);
+    if (midiLearn != nullptr)
+        midiLearn->loadFromXml (*root);
 
     return true;
 }
@@ -239,7 +270,9 @@ bool ProjectState::xmlToChannel (const juce::XmlElement* el, ChannelState& ch)
     ch.pan         = (float) el->getDoubleAttribute ("pan", 0.0);
     ch.plugins.clear();
 
-    for (auto* plugEl : el->getChildIterator())
+    // Iterate only <Plugin> children — channelToXml also writes <Appearance>
+    // children, and treating those as plugins created ghost empty slots.
+    for (auto* plugEl : el->getChildWithTagNameIterator ("Plugin"))
     {
         PluginSlotState slot;
         slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");

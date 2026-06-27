@@ -36,6 +36,9 @@ public:
     /** Remove plugin at position in chain. */
     void removePlugin (int chainIndex);
 
+    /** Remove all plugins from the chain. */
+    void clearAllPlugins();
+
     /** Move plugin within chain. */
     void movePlugin (int fromIndex, int toIndex);
 
@@ -57,6 +60,13 @@ public:
         std::unique_ptr<juce::AudioPluginInstance> processor;
         juce::String identifier;
         bool         bypassed = false;
+
+        // Editor window for this plugin, if currently open. Non-owning safe
+        // pointer: the window self-deletes when the user closes it (and this
+        // auto-nulls), but we also force it closed before the processor is
+        // destroyed so the editor can never outlive the plugin it points at.
+        // Lives on the message thread only.
+        juce::Component::SafePointer<juce::DocumentWindow> editorWindow;
     };
 
     const PluginEntry& getPluginEntry (int chainIndex) const;
@@ -112,6 +122,11 @@ private:
     juce::AudioPlayHead*      playHead = nullptr;
     juce::Array<PluginEntry*> pluginChain;
     juce::CriticalSection     chainLock;
+
+    /** Close any open editor window, then delete the entry (and its plugin).
+        MUST be called on the message thread and with the entry already removed
+        from pluginChain so the audio thread can no longer reach it. */
+    static void disposeEntry (PluginEntry* entry);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelStrip)
 };

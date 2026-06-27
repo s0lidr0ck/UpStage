@@ -78,8 +78,12 @@ void SceneManager::saveToXml (juce::XmlElement& parent) const
         auto* globEl = sceneEl->createNewChildElement ("Globals");
         globEl->setAttribute ("gateEnabled",  scenes[i].globals.gateEnabled ? 1 : 0);
         globEl->setAttribute ("gateThreshDb", scenes[i].globals.gateThreshDb);
+        globEl->setAttribute ("gateAttackMs", scenes[i].globals.gateAttackMs);
+        globEl->setAttribute ("gateHoldMs",   scenes[i].globals.gateHoldMs);
+        globEl->setAttribute ("gateReleaseMs",scenes[i].globals.gateReleaseMs);
         globEl->setAttribute ("inputTrimDb",  scenes[i].globals.inputTrimDb);
         globEl->setAttribute ("fxBypassed",   scenes[i].globals.fxBusState.bypassed ? 1 : 0);
+        globEl->setAttribute ("inputDirectMix", scenes[i].globals.inputDirectMix);
         for (const auto& slot : scenes[i].globals.fxBusState.plugins)
         {
             auto* fxPlugEl = globEl->createNewChildElement ("FxPlugin");
@@ -88,6 +92,21 @@ void SceneManager::saveToXml (juce::XmlElement& parent) const
             fxPlugEl->setAttribute ("bypassed", slot.isBypassed ? 1 : 0);
             if (slot.stateData.getSize() > 0)
                 fxPlugEl->addTextElement (slot.stateData.toBase64Encoding());
+        }
+
+        // Input channel state
+        auto* inChEl = globEl->createNewChildElement ("InputChannel");
+        const auto& inCh = scenes[i].globals.inputChannelState;
+        inChEl->setAttribute ("inputGain",  inCh.inputGain);
+        inChEl->setAttribute ("outputGain", inCh.outputGain);
+        for (const auto& slot : inCh.plugins)
+        {
+            auto* plugEl = inChEl->createNewChildElement ("Plugin");
+            plugEl->setAttribute ("id",       slot.pluginIdentifier);
+            plugEl->setAttribute ("name",     slot.pluginName);
+            plugEl->setAttribute ("bypassed", slot.isBypassed ? 1 : 0);
+            if (slot.stateData.getSize() > 0)
+                plugEl->addTextElement (slot.stateData.toBase64Encoding());
         }
 
         for (int c = 0; c < NUM_CHANNELS; ++c)
@@ -132,8 +151,12 @@ void SceneManager::loadFromXml (const juce::XmlElement& parent)
         {
             scenes[idx].globals.gateEnabled  = globEl->getIntAttribute ("gateEnabled", 0) != 0;
             scenes[idx].globals.gateThreshDb = (float) globEl->getDoubleAttribute ("gateThreshDb", -60.0);
+            scenes[idx].globals.gateAttackMs  = (float) globEl->getDoubleAttribute ("gateAttackMs", 5.0);
+            scenes[idx].globals.gateHoldMs    = (float) globEl->getDoubleAttribute ("gateHoldMs", 50.0);
+            scenes[idx].globals.gateReleaseMs = (float) globEl->getDoubleAttribute ("gateReleaseMs", 100.0);
             scenes[idx].globals.inputTrimDb  = (float) globEl->getDoubleAttribute ("inputTrimDb", 0.0);
             scenes[idx].globals.fxBusState.bypassed = globEl->getIntAttribute ("fxBypassed", 0) != 0;
+            scenes[idx].globals.inputDirectMix = (float) globEl->getDoubleAttribute ("inputDirectMix", 0.0);
             scenes[idx].globals.fxBusState.plugins.clear();
             for (auto* fxPlugEl : globEl->getChildWithTagNameIterator ("FxPlugin"))
             {
@@ -145,6 +168,25 @@ void SceneManager::loadFromXml (const juce::XmlElement& parent)
                 if (b64.isNotEmpty())
                     slot.stateData.fromBase64Encoding (b64);
                 scenes[idx].globals.fxBusState.plugins.add (slot);
+            }
+
+            // Input channel state
+            if (auto* inChEl = globEl->getChildByName ("InputChannel"))
+            {
+                scenes[idx].globals.inputChannelState.inputGain  = (float) inChEl->getDoubleAttribute ("inputGain", 1.0);
+                scenes[idx].globals.inputChannelState.outputGain = (float) inChEl->getDoubleAttribute ("outputGain", 1.0);
+                scenes[idx].globals.inputChannelState.plugins.clear();
+                for (auto* plugEl : inChEl->getChildWithTagNameIterator ("Plugin"))
+                {
+                    PluginSlotState slot;
+                    slot.pluginIdentifier = plugEl->getStringAttribute ("id");
+                    slot.pluginName       = plugEl->getStringAttribute ("name");
+                    slot.isBypassed       = plugEl->getBoolAttribute   ("bypassed");
+                    auto b64 = plugEl->getAllSubText().trim();
+                    if (b64.isNotEmpty())
+                        slot.stateData.fromBase64Encoding (b64);
+                    scenes[idx].globals.inputChannelState.plugins.add (slot);
+                }
             }
         }
 

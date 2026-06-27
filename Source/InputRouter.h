@@ -30,7 +30,7 @@ public:
     //==========================================================================
     // Mode switching
     void setMode (Mode m);
-    Mode getMode() const { return mode; }
+    Mode getMode() const { return mode.load(); }
 
     //==========================================================================
     // Loop file player
@@ -43,10 +43,12 @@ public:
     double getLoopPosition() const;
     void   setLoopPosition (double normalisedPos);
 
-    float loopVolume = 1.0f;  // adjust loop playback level
+    std::atomic<float> loopVolume { 1.0f };  // adjust loop playback level
 
 private:
-    Mode   mode       = Mode::Live;
+    // mode and loopPlaying are read on the audio thread (fillNextBlock) and
+    // written on the message thread, so they must be atomic.
+    std::atomic<Mode>  mode { Mode::Live };
     double sampleRate = 44100.0;
     int    blockSize  = 256;
 
@@ -57,7 +59,7 @@ private:
     juce::ResamplingAudioSource     resamplingSource { &transportSource, false, 2 };
 
     juce::CriticalSection loaderLock;
-    bool                  loopPlaying = false;
+    std::atomic<bool>     loopPlaying { false };
     juce::String          loopFileName;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override {}

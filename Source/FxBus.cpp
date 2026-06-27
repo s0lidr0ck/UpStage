@@ -8,10 +8,28 @@ FxBus::FxBus (juce::AudioPluginFormatManager& fm)
 
 FxBus::~FxBus()
 {
-    juce::ScopedLock sl (chainLock);
-    for (auto* e : pluginChain)
-        delete e;
-    pluginChain.clear();
+    // Detach under the lock, dispose outside it — see ChannelStrip for rationale.
+    juce::Array<PluginEntry*> doomed;
+    {
+        juce::ScopedLock sl (chainLock);
+        doomed.swapWith (pluginChain);
+    }
+    for (auto* e : doomed)
+        disposeEntry (e);
+}
+
+void FxBus::disposeEntry (PluginEntry* entry)
+{
+    if (entry == nullptr)
+        return;
+
+    // Close the editor window first so it can never reference a destroyed
+    // processor. The window self-deletes via closeButtonPressed, so only
+    // delete it here if it is still open.
+    if (entry->editorWindow != nullptr)
+        delete entry->editorWindow.getComponent();
+
+    delete entry;
 }
 
 //==============================================================================
@@ -95,45 +113,67 @@ bool FxBus::addPlugin (const juce::PluginDescription& desc,
 
 void FxBus::removePlugin (int index)
 {
-    juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (index, pluginChain.size()))
+    PluginEntry* entry = nullptr;
     {
-        auto* entry = pluginChain.removeAndReturn (index);
-        delete entry;
+        juce::ScopedLock sl (chainLock);
+        if (juce::isPositiveAndBelow (index, pluginChain.size()))
+            entry = pluginChain.removeAndReturn (index);
     }
+    disposeEntry (entry);
+}
+
+void FxBus::clearAllPlugins()
+{
+    juce::Array<PluginEntry*> doomed;
+    {
+        juce::ScopedLock sl (chainLock);
+        doomed.swapWith (pluginChain);
+    }
+    for (auto* e : doomed)
+        disposeEntry (e);
 }
 
 void FxBus::openPluginEditor (int index)
 {
-    juce::ScopedLock sl (chainLock);
-    if (! juce::isPositiveAndBelow (index, pluginChain.size())) return;
+    // Message thread only — touches the GUI and the per-entry editorWindow.
+    JUCE_ASSERT_MESSAGE_THREAD
 
-    auto* proc = pluginChain[index]->processor.get();
+    PluginEntry* entry = nullptr;
+    {
+        juce::ScopedLock sl (chainLock);
+        if (! juce::isPositiveAndBelow (index, pluginChain.size())) return;
+        entry = pluginChain[index];
+    }
+
+    auto* proc = entry->processor.get();
     if (proc == nullptr || ! proc->hasEditor()) return;
 
-    juce::MessageManager::callAsync ([proc]()
+    if (entry->editorWindow != nullptr)
     {
-        struct FxEditorWindow : public juce::DocumentWindow
-        {
-            FxEditorWindow (juce::AudioProcessor* p)
-                : juce::DocumentWindow ("Master: " + p->getName(),
-                                        juce::Colours::darkgrey,
-                                        juce::DocumentWindow::closeButton,
-                                        true)
-            {
-                if (auto* editor = p->createEditorIfNeeded())
-                {
-                    setContentOwned (editor, true);
-                    setResizable (true, false);
-                    centreWithSize (editor->getWidth(), editor->getHeight());
-                }
-                setVisible (true);
-            }
-            void closeButtonPressed() override { delete this; }
-        };
+        entry->editorWindow->toFront (true);
+        return;
+    }
 
-        new FxEditorWindow (proc);
-    });
+    struct FxEditorWindow : public juce::DocumentWindow
+    {
+        FxEditorWindow (juce::AudioProcessor* p)
+            : juce::DocumentWindow ("Master: " + p->getName(),
+                                    juce::Colours::darkgrey,
+                                    juce::DocumentWindow::closeButton,
+                                    true)
+        {
+            if (auto* editor = p->createEditorIfNeeded())
+            {
+                setContentOwned (editor, true);
+                setResizable (true, false);
+                centreWithSize (editor->getWidth(), editor->getHeight());
+            }
+            setVisible (true);
+        }
+        void closeButtonPressed() override { delete this; }
+    };
+
+    entry->editorWindow = new FxEditorWindow (proc);
 }
 
 void FxBus::setPluginBypassed (int index, bool b)
@@ -181,7 +221,12 @@ void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples, juce
     if (bypassed.load (std::memory_order_relaxed))
         return;
 
-    juce::ScopedLock sl (chainLock);
+    // Try-lock, never block: the message thread may hold chainLock while doing
+    // slow plugin state I/O during a scene recall or project load. Pass the
+    // block through untouched rather than stalling the audio thread.
+    juce::ScopedTryLock sl (chainLock);
+    if (! sl.isLocked())
+        return;
 
     if (pluginChain.isEmpty())
         return;
@@ -235,4 +280,16 @@ FxBus::State FxBus::getState() const
 void FxBus::setState (const State& s)
 {
     bypassed.store (s.bypassed);
+
+    juce::ScopedLock sl (chainLock);
+    int numToRestore = juce::jmin (pluginChain.size(), s.plugins.size());
+    for (int i = 0; i < numToRestore; ++i)
+    {
+        const auto& slot = s.plugins.getReference (i);
+        pluginChain[i]->bypassed = slot.isBypassed;
+
+        if (pluginChain[i]->processor != nullptr && slot.stateData.getSize() > 0)
+            pluginChain[i]->processor->setStateInformation (
+                slot.stateData.getData(), (int) slot.stateData.getSize());
+    }
 }

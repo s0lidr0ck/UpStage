@@ -8,7 +8,8 @@ FxBusPanel::FxBusPanel (FxBus& b)
     headerLabel.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
     headerLabel.setJustificationType (juce::Justification::centred);
     headerLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffcc99));
-    headerLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff3d3428));
+    // Transparent background: the accent header band drawn in paint() shows through (#8).
+    headerLabel.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (headerLabel);
 
     bypassToggle.onStateChange = [this] { bus.setBypassed (bypassToggle.getToggleState()); };
@@ -134,6 +135,25 @@ void FxBusPanel::paint (juce::Graphics& g)
     g.drawVerticalLine (0, 0.0f, (float) getHeight());
     g.setColour (juce::Colours::white.withAlpha (0.04f));
     g.drawVerticalLine (1, 0.0f, (float) getHeight());
+
+    // Master-section prominence (#8): brighter bezel + accent header band so the
+    // master strip reads as a distinct section, not "channel 5".
+    {
+        auto full = bounds;
+        // Accent band behind the MASTER header label.
+        auto band = juce::Rectangle<float> (3.0f, 2.0f,
+                                            full.getWidth() - 6.0f,
+                                            (float) headerLabel.getBottom());
+        juce::ColourGradient hg (
+            juce::Colour (0xff4a3a5a), band.getX(), band.getY(),
+            juce::Colour (0xff2a2230), band.getX(), band.getBottom(), false);
+        g.setGradientFill (hg);
+        g.fillRoundedRectangle (band, 3.0f);
+
+        // Brighter metallic frame around the whole strip.
+        g.setColour (juce::Colour (0xff4a4452));
+        g.drawRoundedRectangle (full.reduced (1.5f), 5.0f, 1.5f);
+    }
 
     int slotStartY = headerLabel.getBottom() + 4;
 

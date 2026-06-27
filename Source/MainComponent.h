@@ -25,6 +25,8 @@
 #include "VuMeter.h"
 #include "MidiMonitorWindow.h"
 #include "MidiRulesPanel.h"
+#include "SongBar.h"
+#include "LoadingOverlay.h"
 
 /**
  * MainComponent  v0.4 - Mixer-Style Layout
@@ -108,6 +110,8 @@ public:
     void saveProjectAs();
     bool isProjectDirty() const { return projectDirty; }
     void loadProjectData (const ProjectData& data);
+    void loadProjectPlugins (const ProjectData& data);
+    void loadSongState (const ProjectData& data);
     ProjectData collectProjectData() const;
 
     // Channel switching
@@ -268,6 +272,7 @@ private:
 
     // Setlist
     juce::TextButton  setlistButton    { "Setlist" };
+    std::unique_ptr<SongBar> songBar;
 
     // Noise gate
     juce::ToggleButton gateToggle      { "Gate" };
@@ -278,6 +283,17 @@ private:
     juce::TextButton   sceneButtons[NUM_SCENES];
     juce::TextButton   saveSceneButtons[NUM_SCENES];
     int                activeSceneIndex = -1;
+    int                sceneFlashIndex  = -1;
+    int                sceneFlashCounter = 0;
+
+    // Hold-to-save: numpad key hold detection
+    int                heldSceneIndex   = -1;
+    juce::int64        holdStartMs      = 0;
+    float              heldSceneProgress = 0.0f;  // 0..1 numpad hold-to-save (#5)
+    int                midiBadgeTick     = 0;      // throttles MIDI tooltip refresh (#6)
+
+    // Scene recall mute (glitch prevention)
+    bool               sceneMuteActive  = false;
 
     // Input channel strip (pre-FX)
     juce::Label                        inputChannelLabel;
@@ -299,6 +315,9 @@ private:
     juce::Slider                       outputGainKnobs[NUM_CHANNELS];
     juce::Slider                       inputTrimKnobs[NUM_CHANNELS];
     juce::Label                        channelLabels[NUM_CHANNELS];
+    // Screen bounds of each channel strip, cached in resized() for paint-time
+    // overlays (active-channel frame #1, scribble strips #7).
+    juce::Rectangle<int>               channelStripBounds[NUM_CHANNELS];
     juce::Label                        faderLevelLabels[NUM_CHANNELS];
     juce::Label                        outputGainLabels[NUM_CHANNELS];
     juce::Label                        inputTrimLabels[NUM_CHANNELS];
@@ -334,10 +353,24 @@ private:
     void showKnobColorMenu (juce::Component* knob);
     void openAsioSettings();
     void showSetlistPanel();
+    void saveSongState();
 
     void updateSceneButtonStates();
+    void flashSceneButton (int sceneIndex);
+    void applySceneWithMute (int sceneIndex);
+    void captureSceneFromCurrent (int sceneIndex);
     void updateTransportUI();
+    void updateRoutingModeButton();  // sync routing pill text/colour/tooltip
     void updateStatusBar();
+
+    // Shared floating value readout shown while turning a knob (#2 usability).
+    std::unique_ptr<juce::Label> knobReadout;
+    void showKnobReadout (juce::Component& nearComp, const juce::String& text);
+    void hideKnobReadout();
+
+    // Maps a learnable on-screen control to its MidiLearnManager paramID (#2/#6).
+    std::map<juce::Component*, juce::String> learnableControls;
+    juce::String paramIdForComponent (juce::Component* c) const;
     void updateFaderLabel (int channelIndex);
     void updateActiveIndicators();
 
@@ -359,16 +392,24 @@ private:
     struct Biquad {
         float b0=1,b1=0,b2=0,a1=0,a2=0, z1=0,z2=0;
         float process (float x) {
-            float y = b0*x + b1*z1 + b2*z2 - a1*z1 - a2*z2;
-            // direct form II transposed
+            // Direct form II transposed.
             float w = x - a1*z1 - a2*z2;
-            y = b0*w + b1*z1 + b2*z2;
+            float y = b0*w + b1*z1 + b2*z2;
             z2 = z1; z1 = w;
+            // A single NaN/Inf would persist in the filter state and poison all
+            // subsequent output (the metering would read silence forever); reset.
+            if (! std::isfinite (z1) || ! std::isfinite (z2)) { z1 = z2 = 0; return 0.0f; }
             return y;
         }
         void reset() { z1 = z2 = 0; }
     };
     Biquad kShelfL, kShelfR, kHpL, kHpR;
+
+    // Pre-allocated audio scratch buffers, sized in prepareToPlay(). Allocating
+    // these in getNextAudioBlock() would heap-allocate on the real-time thread
+    // every block — a classic cause of glitches/dropouts.
+    juce::AudioBuffer<float> work, masterMix, directSignal, silentBuffer;
+    juce::AudioBuffer<float> channelOutputs[NUM_CHANNELS];
 
     enum MenuIDs
     {
@@ -399,6 +440,8 @@ private:
     void restoreAudioDeviceState();
 
     std::unique_ptr<juce::FileChooser> fileChooser;
+    LoadingOverlay loadingOverlay;
+    int            pendingPluginLoads = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
