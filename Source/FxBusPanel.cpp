@@ -12,8 +12,12 @@ FxBusPanel::FxBusPanel (FxBus& b)
     headerLabel.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (headerLabel);
 
+    bypassToggle.setButtonText ("FX BYPASS");
     bypassToggle.onStateChange = [this] { bus.setBypassed (bypassToggle.getToggleState()); };
     bypassToggle.setToggleState (bus.isBypassed(), juce::dontSendNotification);
+    bypassToggle.setColour (juce::ToggleButton::textColourId, juce::Colour (0xff99887a));
+    bypassToggle.setColour (juce::ToggleButton::tickColourId, juce::Colour (0xffffaa44));
+    bypassToggle.setTooltip ("Bypass the entire master insert chain.");
     addAndMakeVisible (bypassToggle);
 
     addFxButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2220));
@@ -197,6 +201,76 @@ void FxBusPanel::paint (juce::Graphics& g)
             auto displayName = slots[i].nickname.isNotEmpty() ? slots[i].nickname : slots[i].name;
             g.drawText (displayName, slotRect.reduced (4, 0), juce::Justification::centredLeft, true);
         }
+    }
+
+    // ---- Separator grooves above and below the insert-slot bank ----
+    {
+        auto groove = [&g, this] (int gy)
+        {
+            g.setColour (juce::Colour (0xff0a0908));
+            g.drawHorizontalLine (gy, 4.0f, (float) getWidth() - 4.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.drawHorizontalLine (gy + 1, 4.0f, (float) getWidth() - 4.0f);
+        };
+        groove (slotStartY - 3);
+        groove (slotStartY + FxBus::MAX_FX_SLOTS * (kSlotHeight + kSlotPadding) + 1);
+    }
+
+    // ---- Master VOLUME knob: its own bolted sub-plate with corner screws ----
+    {
+        auto kb = masterKnob.getBounds().toFloat();
+        // Plate spans the knob column, from just under the dB readout to the
+        // bottom of the strip; gives the knob a distinct "separate module" feel.
+        auto plate = juce::Rectangle<float> (4.0f, masterKnobCaption.getY() - 4.0f,
+                                             getWidth() - 8.0f,
+                                             (float) getHeight() - (masterKnobCaption.getY() - 4.0f) - 4.0f);
+
+        // Recessed dark border, then a raised brushed-metal face.
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillRoundedRectangle (plate.expanded (1.0f), 6.0f);
+        juce::ColourGradient pg (juce::Colour (0xff3c3833), plate.getCentreX(), plate.getY(),
+                                 juce::Colour (0xff262320), plate.getCentreX(), plate.getBottom(), false);
+        pg.addColour (0.5, juce::Colour (0xff322e2a));
+        g.setGradientFill (pg);
+        g.fillRoundedRectangle (plate, 5.0f);
+        // Top highlight + frame for the raised look.
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.drawHorizontalLine ((int) plate.getY() + 1, plate.getX() + 4.0f, plate.getRight() - 4.0f);
+        g.setColour (juce::Colour (0xff4a4640));
+        g.drawRoundedRectangle (plate, 5.0f, 1.0f);
+
+        auto screw = [&g] (float cx, float cy)
+        {
+            const float rad = 5.0f;
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillEllipse (cx - rad - 1.2f, cy - rad - 1.2f, (rad + 1.2f) * 2.0f, (rad + 1.2f) * 2.0f);
+            juce::ColourGradient head (juce::Colour (0xff6e6a62), cx, cy - rad,
+                                       juce::Colour (0xff2a2724), cx, cy + rad, false);
+            head.addColour (0.5, juce::Colour (0xff4a463f));
+            g.setGradientFill (head);
+            g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.8f);
+            auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (35.0f), cx, cy);
+            const float s = rad * 0.72f;
+            juce::Point<float> p1 (cx - s, cy), p2 (cx + s, cy);
+            p1.applyTransform (rot); p2.applyTransform (rot);
+            g.setColour (juce::Colours::black.withAlpha (0.65f));
+            g.drawLine ({ p1, p2 }, 1.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            g.fillEllipse (cx - rad * 0.5f, cy - rad * 0.6f, rad * 0.6f, rad * 0.6f);
+        };
+
+        // One screw in each corner of the knob area (inset from the plate edge).
+        float inset = 11.0f;
+        float kcx = kb.getCentreX(), kcy = kb.getCentreY();
+        float half = juce::jmax (kb.getWidth(), kb.getHeight()) * 0.5f + 6.0f;
+        float left = juce::jmax (plate.getX() + inset, kcx - half);
+        float right = juce::jmin (plate.getRight() - inset, kcx + half);
+        float topYs = juce::jmax (plate.getY() + inset, kcy - half);
+        float botYs = juce::jmin (plate.getBottom() - inset, kcy + half);
+        screw (left, topYs);  screw (right, topYs);
+        screw (left, botYs);  screw (right, botYs);
     }
 }
 
