@@ -1289,8 +1289,10 @@ void MainComponent::paint (juce::Graphics& g)
 
     // ---- Scene row: recessed panel band with end screws ----
     {
-        // Band spans y=110..138 (after menu 28 + songbar 34 + transport 48).
-        auto band = juce::Rectangle<float> (3.0f, 110.0f, w - 6.0f, 28.0f);
+        // The scene row occupies y=110..138 (menu 28 + songbar 34 + transport
+        // 48 .. mixerTop 138). Inset the band 2px top/bottom so it floats evenly
+        // and clears the strip-grid groove drawn at y=138.
+        auto band = juce::Rectangle<float> (3.0f, 112.0f, w - 6.0f, 24.0f);
 
         // Recessed sub-panel: dark border, brushed face, top-shadow / bottom-lip.
         g.setColour (juce::Colours::black.withAlpha (0.5f));
@@ -2263,7 +2265,7 @@ void MainComponent::resized()
     // and even top/bottom padding so the buttons sit centred. Panel + screws
     // are drawn in paint() using these same insets.
     auto sceneBand = area.removeFromTop (28);            // full row band
-    auto scenesRow = sceneBand.reduced (0, 5);           // even vertical gutter
+    auto scenesRow = sceneBand.reduced (0, 2);           // even vertical gutter (24px tall buttons)
     scenesRow.removeFromLeft (18);                       // left gutter for screw
     scenesRow.removeFromRight (18);                      // right gutter for screw
     int sceneWidth = (scenesRow.getWidth() - (NUM_SCENES - 1) * 3) / NUM_SCENES;

@@ -747,13 +747,13 @@ public:
         if (n == 0) return;
 
         const int totalCols = n * gw + (n - 1) * charGap;
-        auto area = bounds.reduced (6.0f, 5.0f);
-        // Largest dot pitch that fits, capped a bit smaller so the matrix has
-        // breathing room inside the recessed screen rather than filling it.
+        auto area = bounds.reduced (5.0f, 2.5f);
+        // Largest dot pitch that fits, capped so the matrix has breathing room
+        // inside the recessed screen rather than filling it.
         float pitch = juce::jmin (area.getWidth() / (float) totalCols,
                                   area.getHeight() / (float) gh);
         pitch = juce::jmin (pitch, 3.0f);
-        float dotRadius = juce::jmax (0.7f, pitch * 0.40f);
+        float dotRadius = juce::jmax (0.65f, pitch * 0.40f);
 
         float gridW = totalCols * pitch;
         float gridH = gh * pitch;
