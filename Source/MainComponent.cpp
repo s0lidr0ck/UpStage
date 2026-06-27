@@ -1287,24 +1287,33 @@ void MainComponent::paint (juce::Graphics& g)
     drawGroove (28);
     drawGroove (76);
 
-    // ---- Scene row: recessed panel band with end screws ----
+    // ---- Scene row: a raised horizontal drop-in module ----
     {
-        // Centre the band between its visible neighbours: the toolbar buttons
-        // end at y=104 (transport row inset 6px) and the strip-grid groove is at
-        // y=138, so a 24px band centred in 104..138 sits at 109..133.
-        auto band = juce::Rectangle<float> (3.0f, 109.0f, w - 6.0f, 24.0f);
+        // The toolbar ends at y=104 and the strip groove is at y=138. Centre a
+        // 26px module in that 34px region (108..134) so a ~4px seam/gutter shows
+        // all the way around — the unit reads as dropped into the chassis.
+        auto band = juce::Rectangle<float> (6.0f, 108.0f, w - 12.0f, 26.0f);
 
-        // Recessed sub-panel: dark border, brushed face, top-shadow / bottom-lip.
-        g.setColour (juce::Colours::black.withAlpha (0.5f));
-        g.fillRoundedRectangle (band.expanded (1.0f), 5.0f);
-        juce::ColourGradient pg (juce::Colour (0xff2c2a27), band.getCentreX(), band.getY(),
-                                 juce::Colour (0xff201e1c), band.getCentreX(), band.getBottom(), false);
+        // Recessed seam/slot the module drops into (dark channel around it).
+        g.setColour (juce::Colour (0xff0a0908));
+        g.fillRoundedRectangle (band.expanded (2.0f), 5.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.7f));        // shadow at slot top
+        g.drawHorizontalLine ((int) band.getY() - 2, band.getX() - 1.0f, band.getRight() + 1.0f);
+
+        // Raised module face: top-lit so it sits PROUD of the surface.
+        juce::ColourGradient pg (juce::Colour (0xff353230), band.getCentreX(), band.getY(),
+                                 juce::Colour (0xff211f1d), band.getCentreX(), band.getBottom(), false);
+        pg.addColour (0.45, juce::Colour (0xff2b2926));
         g.setGradientFill (pg);
         g.fillRoundedRectangle (band, 4.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.6f));      // top inner shadow
-        g.drawHorizontalLine ((int) band.getY() + 1, band.getX() + 3.0f, band.getRight() - 3.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.05f));     // bottom lip
-        g.drawHorizontalLine ((int) band.getBottom() - 1, band.getX() + 3.0f, band.getRight() - 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));      // top bevel highlight
+        g.drawHorizontalLine ((int) band.getY() + 1, band.getX() + 4.0f, band.getRight() - 4.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.04f));      // left bevel
+        g.drawVerticalLine ((int) band.getX() + 1, band.getY() + 4.0f, band.getBottom() - 4.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));      // bottom shadow edge
+        g.drawHorizontalLine ((int) band.getBottom() - 1, band.getX() + 4.0f, band.getRight() - 4.0f);
+        g.setColour (juce::Colour (0xff4a4640));                    // crisp frame
+        g.drawRoundedRectangle (band, 4.0f, 1.0f);
 
         // A screw in each end gutter, vertically centred in the band.
         auto bandScrew = [&g] (float cx, float cy)
@@ -2265,12 +2274,12 @@ void MainComponent::resized()
     // and even top/bottom padding so the buttons sit centred. Panel + screws
     // are drawn in paint() using these same insets.
     auto sceneBand = area.removeFromTop (28);            // reserves y=110..138
-    // Buttons occupy the painted band at y=109..133 (see paint()); shift up 1px
-    // from the region top and use a 24px height to match the centred panel.
-    auto scenesRow = juce::Rectangle<int> (sceneBand.getX(), 109,
-                                           sceneBand.getWidth(), 24);
-    scenesRow.removeFromLeft (18);                       // left gutter for screw
-    scenesRow.removeFromRight (18);                      // right gutter for screw
+    // Buttons sit inside the raised module face (painted at y=108..134); inset
+    // to 111..131 so the module's bevel shows around them.
+    auto scenesRow = juce::Rectangle<int> (sceneBand.getX(), 111,
+                                           sceneBand.getWidth(), 20);
+    scenesRow.removeFromLeft (20);                       // left gutter for screw
+    scenesRow.removeFromRight (20);                      // right gutter for screw
     int sceneWidth = (scenesRow.getWidth() - (NUM_SCENES - 1) * 3) / NUM_SCENES;
     for (int i = 0; i < NUM_SCENES; ++i)
     {
