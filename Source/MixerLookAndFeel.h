@@ -73,6 +73,18 @@ public:
             g.setColour (juce::Colours::white.withAlpha (0.03f));
             g.drawVerticalLine ((int)(slotX + slotWidth - 1), trackTop, trackBottom);
 
+            // ---- Thumb travel range ----
+            // The thumb (72px tall) must stay inside the slot, so its CENTRE
+            // travels between the slot ends inset by half the thumb. The dB
+            // scale below is mapped onto this same range so the indicator line
+            // stays aligned with the ticks.
+            const float thumbHeight = 72.0f;
+            float travelTop    = trackTop + thumbHeight * 0.5f;
+            float travelBottom = trackBottom - thumbHeight * 0.5f;
+            if (travelBottom < travelTop)   // pathologically short slot
+                travelTop = travelBottom = (trackTop + trackBottom) * 0.5f;
+            float travelH = travelBottom - travelTop;
+
             // ---- dB scale with labels ----
             auto& range = slider.getNormalisableRange();
 
@@ -91,7 +103,7 @@ public:
                 if (tick.db < range.start || tick.db > range.end) continue;
 
                 double proportion = range.convertTo0to1 (tick.db);
-                float tickY = trackTop + trackH * (1.0f - (float)proportion);
+                float tickY = travelTop + travelH * (1.0f - (float)proportion);
 
                 // Tick lines on both sides
                 g.setColour (juce::Colour (0xff555555));
@@ -108,9 +120,12 @@ public:
 
             // ---- Fader thumb / cap ----
             float thumbWidth = juce::jmin ((float)width * 0.6f, 42.0f);
-            float thumbHeight = 72.0f;
             float thumbX = cx - thumbWidth * 0.5f;
-            float thumbY = sliderPos - thumbHeight * 0.5f;
+            // Map the current value onto the constrained travel range so the
+            // thumb never overshoots the slot ends.
+            double valProp = range.convertTo0to1 (slider.getValue());
+            float thumbCentreY = travelTop + travelH * (1.0f - (float) valProp);
+            float thumbY = thumbCentreY - thumbHeight * 0.5f;
 
             juce::Colour faderCol = getFaderColour (slider);
 
