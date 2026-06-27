@@ -626,6 +626,63 @@ public:
     }
 
     //==========================================================================
+    // 5x7 dot-matrix font. Each glyph is 5 column-bytes; bit r (0=top) of a
+    // column byte lights the dot at that row. Covers A-Z, 0-9, space, and a few
+    // symbols; unknown chars fall back to a blank/box.
+    static const uint8_t* dotFont5x7 (juce::juce_wchar ch)
+    {
+        // columns are listed left-to-right; each byte's low 7 bits are rows top->bottom
+        static const uint8_t blank[5]   = { 0,0,0,0,0 };
+        static const uint8_t box[5]     = { 0x7F,0x41,0x41,0x41,0x7F };
+        switch (ch)
+        {
+            case ' ': { static const uint8_t g[5]={0,0,0,0,0}; return g; }
+            case 'A': { static const uint8_t g[5]={0x7E,0x09,0x09,0x09,0x7E}; return g; }
+            case 'B': { static const uint8_t g[5]={0x7F,0x49,0x49,0x49,0x36}; return g; }
+            case 'C': { static const uint8_t g[5]={0x3E,0x41,0x41,0x41,0x22}; return g; }
+            case 'D': { static const uint8_t g[5]={0x7F,0x41,0x41,0x22,0x1C}; return g; }
+            case 'E': { static const uint8_t g[5]={0x7F,0x49,0x49,0x49,0x41}; return g; }
+            case 'F': { static const uint8_t g[5]={0x7F,0x09,0x09,0x09,0x01}; return g; }
+            case 'G': { static const uint8_t g[5]={0x3E,0x41,0x49,0x49,0x7A}; return g; }
+            case 'H': { static const uint8_t g[5]={0x7F,0x08,0x08,0x08,0x7F}; return g; }
+            case 'I': { static const uint8_t g[5]={0x00,0x41,0x7F,0x41,0x00}; return g; }
+            case 'J': { static const uint8_t g[5]={0x20,0x40,0x41,0x3F,0x01}; return g; }
+            case 'K': { static const uint8_t g[5]={0x7F,0x08,0x14,0x22,0x41}; return g; }
+            case 'L': { static const uint8_t g[5]={0x7F,0x40,0x40,0x40,0x40}; return g; }
+            case 'M': { static const uint8_t g[5]={0x7F,0x02,0x0C,0x02,0x7F}; return g; }
+            case 'N': { static const uint8_t g[5]={0x7F,0x04,0x08,0x10,0x7F}; return g; }
+            case 'O': { static const uint8_t g[5]={0x3E,0x41,0x41,0x41,0x3E}; return g; }
+            case 'P': { static const uint8_t g[5]={0x7F,0x09,0x09,0x09,0x06}; return g; }
+            case 'Q': { static const uint8_t g[5]={0x3E,0x41,0x51,0x21,0x5E}; return g; }
+            case 'R': { static const uint8_t g[5]={0x7F,0x09,0x19,0x29,0x46}; return g; }
+            case 'S': { static const uint8_t g[5]={0x46,0x49,0x49,0x49,0x31}; return g; }
+            case 'T': { static const uint8_t g[5]={0x01,0x01,0x7F,0x01,0x01}; return g; }
+            case 'U': { static const uint8_t g[5]={0x3F,0x40,0x40,0x40,0x3F}; return g; }
+            case 'V': { static const uint8_t g[5]={0x1F,0x20,0x40,0x20,0x1F}; return g; }
+            case 'W': { static const uint8_t g[5]={0x7F,0x20,0x18,0x20,0x7F}; return g; }
+            case 'X': { static const uint8_t g[5]={0x63,0x14,0x08,0x14,0x63}; return g; }
+            case 'Y': { static const uint8_t g[5]={0x03,0x04,0x78,0x04,0x03}; return g; }
+            case 'Z': { static const uint8_t g[5]={0x61,0x51,0x49,0x45,0x43}; return g; }
+            case '0': { static const uint8_t g[5]={0x3E,0x51,0x49,0x45,0x3E}; return g; }
+            case '1': { static const uint8_t g[5]={0x00,0x42,0x7F,0x40,0x00}; return g; }
+            case '2': { static const uint8_t g[5]={0x42,0x61,0x51,0x49,0x46}; return g; }
+            case '3': { static const uint8_t g[5]={0x21,0x41,0x45,0x4B,0x31}; return g; }
+            case '4': { static const uint8_t g[5]={0x18,0x14,0x12,0x7F,0x10}; return g; }
+            case '5': { static const uint8_t g[5]={0x27,0x45,0x45,0x45,0x39}; return g; }
+            case '6': { static const uint8_t g[5]={0x3C,0x4A,0x49,0x49,0x30}; return g; }
+            case '7': { static const uint8_t g[5]={0x01,0x71,0x09,0x05,0x03}; return g; }
+            case '8': { static const uint8_t g[5]={0x36,0x49,0x49,0x49,0x36}; return g; }
+            case '9': { static const uint8_t g[5]={0x06,0x49,0x49,0x29,0x1E}; return g; }
+            case '-': { static const uint8_t g[5]={0x08,0x08,0x08,0x08,0x08}; return g; }
+            case '.': { static const uint8_t g[5]={0x00,0x00,0x40,0x00,0x00}; return g; }
+            case '#': { static const uint8_t g[5]={0x14,0x7F,0x14,0x7F,0x14}; return g; }
+            case '/': { static const uint8_t g[5]={0x20,0x10,0x08,0x04,0x02}; return g; }
+            case ':': { static const uint8_t g[5]={0x00,0x36,0x36,0x00,0x00}; return g; }
+            default:  return (ch > 32 ? box : blank);
+        }
+    }
+
+    //==========================================================================
     // Renders the label as an old dot-matrix LCD seen through cheap glossy
     // plastic: lit dots form the glyphs over a grid of dim unlit dots, on a
     // dark green-black screen, with a diagonal gloss sheen on top.
@@ -643,60 +700,50 @@ public:
         g.setGradientFill (screen);
         g.fillRoundedRectangle (bounds.reduced (1.5f), 2.5f);
 
-        // ---- Dot grid ----
-        const float dotPitch = 3.4f;             // spacing between dot centres
-        const float dotRadius = 1.25f;
+        // ---- Fixed 5x7 dot-matrix font (like a real LCD character ROM) ----
+        // Each glyph = 5 columns; lit dots traced from an explicit bitmap so the
+        // text is always crisp and readable, never sampled mush.
+        const int gw = 5, gh = 7;            // glyph cell: 5 wide x 7 tall
+        const int charGap = 1;               // blank columns between chars
+        const int n = text.length();
+        if (n == 0) return;
+
+        const int totalCols = n * gw + (n - 1) * charGap;
         auto area = bounds.reduced (5.0f, 3.0f);
-        const int cols = juce::jmax (1, (int) (area.getWidth()  / dotPitch));
-        const int rows = juce::jmax (1, (int) (area.getHeight() / dotPitch));
+        // Largest dot pitch that fits both width and height.
+        float pitch = juce::jmin (area.getWidth() / (float) totalCols,
+                                  area.getHeight() / (float) gh);
+        float dotRadius = juce::jmax (0.7f, pitch * 0.42f);
 
-        // Render the text into a FULL-RESOLUTION mask (supersampled relative to
-        // the dot grid), then sample each dot from it. Rendering straight into a
-        // tiny cols x rows image gives the font almost no pixels and produces
-        // mush — this keeps the glyphs crisp.
-        const int ss = 4;                        // supersample factor per dot cell
-        const int mw = cols * ss, mh = rows * ss;
-        if (matrixText != text || matrixCols != cols || matrixRows != rows)
-        {
-            matrixText = text; matrixCols = cols; matrixRows = rows;
-            matrixMask = juce::Image (juce::Image::ARGB, mw, mh, true);
-            juce::Graphics mg (matrixMask);
-            mg.setColour (juce::Colours::white);
-            mg.setFont (juce::Font (juce::FontOptions ((float) mh * 0.82f).withStyle ("Bold")));
-            mg.drawText (text, 0, 0, mw, mh, juce::Justification::centred, false);
-        }
-
-        // Centre the grid within the area.
-        float gridW = (cols - 1) * dotPitch;
-        float gridH = (rows - 1) * dotPitch;
-        float ox = area.getCentreX() - gridW * 0.5f;
-        float oy = area.getCentreY() - gridH * 0.5f;
+        float gridW = totalCols * pitch;
+        float gridH = gh * pitch;
+        float ox = area.getCentreX() - gridW * 0.5f + pitch * 0.5f;
+        float oy = area.getCentreY() - gridH * 0.5f + pitch * 0.5f;
 
         const juce::Colour unlit = juce::Colour (0xff1c241a);
-        for (int r = 0; r < rows; ++r)
+        for (int ci = 0; ci < n; ++ci)
         {
-            for (int c = 0; c < cols; ++c)
+            const uint8_t* glyph = dotFont5x7 (text[ci]);
+            int charCol0 = ci * (gw + charGap);
+            for (int col = 0; col < gw; ++col)
             {
-                float cx = ox + c * dotPitch;
-                float cy = oy + r * dotPitch;
-
-                // Average the ss x ss block of the supersampled mask for this dot.
-                float cov = 0.0f;
-                for (int sy = 0; sy < ss; ++sy)
-                    for (int sx = 0; sx < ss; ++sx)
-                        cov += matrixMask.getPixelAt (c * ss + sx, r * ss + sy).getFloatAlpha();
-                cov /= (float) (ss * ss);
-
-                if (cov > 0.35f)
+                uint8_t bits = glyph[col];
+                for (int row = 0; row < gh; ++row)
                 {
-                    g.setColour (litColour.withAlpha (juce::jmin (1.0f, 0.6f + cov * 0.4f)));
-                    g.fillEllipse (cx - dotRadius, cy - dotRadius, dotRadius * 2.0f, dotRadius * 2.0f);
-                }
-                else
-                {
-                    g.setColour (unlit);
-                    g.fillEllipse (cx - dotRadius * 0.7f, cy - dotRadius * 0.7f,
-                                   dotRadius * 1.4f, dotRadius * 1.4f);
+                    float cx = ox + (charCol0 + col) * pitch;
+                    float cy = oy + row * pitch;
+                    bool on = (bits >> row) & 1;
+                    if (on)
+                    {
+                        g.setColour (litColour);
+                        g.fillEllipse (cx - dotRadius, cy - dotRadius, dotRadius * 2.0f, dotRadius * 2.0f);
+                    }
+                    else
+                    {
+                        g.setColour (unlit);
+                        g.fillEllipse (cx - dotRadius * 0.7f, cy - dotRadius * 0.7f,
+                                       dotRadius * 1.4f, dotRadius * 1.4f);
+                    }
                 }
             }
         }
@@ -733,11 +780,6 @@ public:
 
 private:
     const std::map<juce::String, juce::String>* knobColorMapPtr = nullptr;
-
-    // Cache for the dot-matrix coverage mask (rebuilt only when text/grid changes).
-    juce::Image  matrixMask;
-    juce::String matrixText;
-    int matrixCols = 0, matrixRows = 0;
 
     juce::Colour getFaderColour (juce::Slider& slider)
     {
