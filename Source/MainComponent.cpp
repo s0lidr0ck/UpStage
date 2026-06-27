@@ -237,6 +237,7 @@ MainComponent::MainComponent() : menuBar (this)
     for (int i = 0; i < NUM_SCENES; ++i)
     {
         sceneButtons[i].setButtonText ("S" + juce::String (i + 1));
+        sceneButtons[i].setComponentID ("scene_btn");  // dot-matrix LCD rendering
         sceneButtons[i].setColour (juce::TextButton::buttonColourId, juce::Colour (0xff1a1a1a));
         sceneButtons[i].setColour (juce::TextButton::textColourOffId, juce::Colour (0xff555555));
         sceneButtons[i].setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2a5a2a));
@@ -1547,7 +1548,10 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
     {
         if (e.eventComponent == &channelLabels[i])
         {
-            setActiveChannel (i);
+            if (e.mods.isRightButtonDown())
+                showChannelRenameDialog (i);   // right-click: rename
+            else
+                setActiveChannel (i);          // left-click: select
             return;
         }
     }
@@ -4067,6 +4071,34 @@ void MainComponent::flashSceneButton (int sceneIndex)
 }
 
 //==============================================================================
+void MainComponent::showChannelRenameDialog (int channelIndex)
+{
+    if (! juce::isPositiveAndBelow (channelIndex, NUM_CHANNELS)) return;
+
+    auto current = channelLabels[channelIndex].getText();
+    auto* aw = new juce::AlertWindow ("Rename Channel",
+                                       "Enter a name for channel " + juce::String (channelIndex + 1) + ":",
+                                       juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", current, "Name:");
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, channelIndex, aw] (int res)
+        {
+            if (res == 1)
+            {
+                auto newName = aw->getTextEditorContents ("name").trim();
+                if (newName.isNotEmpty())
+                {
+                    channelLabels[channelIndex].setText (newName, juce::sendNotification);
+                    channels[channelIndex]->setName (newName.toStdString());
+                    projectDirty = true;
+                }
+            }
+            delete aw;
+        }), true);
+}
+
 void MainComponent::updateSceneButtonStates()
 {
     for (int i = 0; i < NUM_SCENES; ++i)

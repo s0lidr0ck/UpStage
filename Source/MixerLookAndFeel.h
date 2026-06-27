@@ -457,6 +457,17 @@ public:
                          bool /*highlighted*/, bool /*down*/) override
     {
         auto id = button.getComponentID();
+
+        // Scene buttons render as dot-matrix displays like the strip nameplates.
+        if (id == "scene_btn")
+        {
+            auto col = button.findColour (button.getToggleState()
+                ? juce::TextButton::textColourOnId
+                : juce::TextButton::textColourOffId);
+            drawDotMatrixInto (g, button.getLocalBounds().toFloat(), button.getButtonText().toUpperCase(), col);
+            return;
+        }
+
         if (id.startsWith ("icon_") && ! showButtonLabels)
         {
             auto textColour = button.findColour (button.getToggleState()
@@ -688,16 +699,19 @@ public:
     // dark green-black screen, with a diagonal gloss sheen on top.
     void drawDotMatrixLabel (juce::Graphics& g, juce::Label& label)
     {
-        auto full = label.getLocalBounds().toFloat();
         const auto text = label.getText().toUpperCase();
         // Lit-dot colour comes from the label's text colour (carries active/mute
-        // state), but the MASTER display gets its own cyan so it stands apart
-        // from the amber input/channel screens.
+        // state), but the MASTER display gets its own purple to match the knob.
         juce::Colour litColour = label.findColour (juce::Label::textColourId);
         if (text == "MASTER")
-            litColour = juce::Colour (0xffaa55cc);   // purple, matching the master knob
-        litColour = litColour.brighter (0.25f);      // lift overall brightness
+            litColour = juce::Colour (0xffaa55cc);
+        drawDotMatrixInto (g, label.getLocalBounds().toFloat(), text, litColour.brighter (0.25f));
+    }
 
+    // Reusable dot-matrix LCD renderer: recessed screen + 5x7 lit dots + gloss.
+    void drawDotMatrixInto (juce::Graphics& g, juce::Rectangle<float> full,
+                            const juce::String& text, juce::Colour litColour)
+    {
         // ---- Recess the screen INTO the panel ----
         // The whole display is pushed back behind the faceplate: a dark inner
         // shadow rims the top/left (light from above), a faint lip catches the

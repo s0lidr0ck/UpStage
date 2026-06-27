@@ -373,6 +373,7 @@ private:
     juce::String paramIdForComponent (juce::Component* c) const;
     void updateFaderLabel (int channelIndex);
     void updateActiveIndicators();
+    void showChannelRenameDialog (int channelIndex);
 
     // Level meter data written by audio thread
     std::atomic<float> channelLevelL[NUM_CHANNELS] {};
