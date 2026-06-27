@@ -1356,30 +1356,19 @@ void MainComponent::paint (juce::Graphics& g)
         g.drawVerticalLine ((int)x + 1, (float)mixerTop, (float)statusBottom);
     }
 
-    // ---- Grooves bounding each strip's plugin-slot bank (top + bottom) ----
+    // ---- Horizontal grooves framing the top and bottom of the strip grid ----
+    // Complements the vertical inter-channel separators so the mixer block is
+    // bounded on all sides.
     {
-        auto grooveAcrossStrip = [&g] (int gy, int stripLeft, int sw)
+        auto fullGroove = [&g, w] (int gy)
         {
-            float gx1 = (float) stripLeft + 4.0f;
-            float gx2 = (float) (stripLeft + sw) - 4.0f;
-            g.setColour (juce::Colour (0xff0a0908));
-            g.drawHorizontalLine (gy, gx1, gx2);
+            g.setColour (juce::Colour (0xff060504));
+            g.drawHorizontalLine (gy, 0.0f, w);
             g.setColour (juce::Colours::white.withAlpha (0.05f));
-            g.drawHorizontalLine (gy + 1, gx1, gx2);
+            g.drawHorizontalLine (gy + 1, 0.0f, w);
         };
-
-        auto grooveForPanel = [&] (juce::Component* panel, int stripIndex)
-        {
-            if (panel == nullptr) return;
-            auto b = panel->getBounds();
-            int stripLeft = stripWidth * stripIndex;
-            grooveAcrossStrip (b.getY() - 3, stripLeft, stripWidth);
-            grooveAcrossStrip (b.getBottom() + 1, stripLeft, stripWidth);
-        };
-
-        grooveForPanel (inputChannelPanel.get(), 0);            // INPUT is strip 0
-        for (int i = 0; i < NUM_CHANNELS; ++i)
-            grooveForPanel (channelStripPanels[i].get(), i + 1); // channels are 1..4
+        fullGroove (mixerTop);          // top of the strip grid (below scene row)
+        fullGroove (statusBottom - 1);  // bottom of the strip grid (above status bar)
     }
 
     // ---- Mute overlays on channel strips ----
