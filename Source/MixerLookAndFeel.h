@@ -470,14 +470,27 @@ public:
 
         if (id.startsWith ("icon_") && ! showButtonLabels)
         {
-            auto textColour = button.findColour (button.getToggleState()
+            const bool lit = button.getToggleState();
+            auto textColour = button.findColour (lit
                 ? juce::TextButton::textColourOnId
                 : juce::TextButton::textColourOffId);
-            g.setColour (textColour);
 
             auto area = button.getLocalBounds().toFloat().reduced (3.0f);
             float cx = area.getCentreX(), cy = area.getCentreY();
             float sz = juce::jmin (area.getWidth(), area.getHeight()) * 0.35f;
+
+            // Backlit legend: when active, a glow blooms behind the etched icon
+            // so it reads like an illuminated console switch.
+            if (lit)
+            {
+                float gr = sz * 2.4f;
+                juce::ColourGradient glow (textColour.withAlpha (0.45f), cx, cy,
+                                           textColour.withAlpha (0.0f), cx + gr, cy + gr, true);
+                g.setGradientFill (glow);
+                g.fillEllipse (cx - gr, cy - gr, gr * 2.0f, gr * 2.0f);
+                textColour = textColour.brighter (0.5f);  // brighter filament when lit
+            }
+            g.setColour (textColour);
 
             if (id == "icon_tuner")
             {

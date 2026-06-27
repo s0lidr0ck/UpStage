@@ -1337,16 +1337,12 @@ void MainComponent::paint (juce::Graphics& g)
         g.drawHorizontalLine (y + 1, 0.0f, w);
     };
     drawGroove (28);
-    drawGroove (76);
 
-    // ---- Scene row: a raised horizontal drop-in module ----
+    // Draws a raised drop-in module face within a dark seam — the chassis unit
+    // look shared by the toolbar and scene rows.
+    auto drawDropInModule = [&g, w] (juce::Rectangle<float> band)
     {
-        // The toolbar ends at y=104 and the strip groove is at y=138. Centre a
-        // 26px module in that 34px region (108..134) so a ~4px seam/gutter shows
-        // all the way around — the unit reads as dropped into the chassis.
-        auto band = juce::Rectangle<float> (6.0f, 108.0f, w - 12.0f, 26.0f);
-
-        // Recessed seam/slot the module drops into (dark channel around it).
+        // Recessed seam/slot the module drops into.
         g.setColour (juce::Colour (0xff0a0908));
         g.fillRoundedRectangle (band.expanded (2.0f), 5.0f);
         g.setColour (juce::Colours::black.withAlpha (0.7f));        // shadow at slot top
@@ -1366,6 +1362,17 @@ void MainComponent::paint (juce::Graphics& g)
         g.drawHorizontalLine ((int) band.getBottom() - 1, band.getX() + 4.0f, band.getRight() - 4.0f);
         g.setColour (juce::Colour (0xff4a4640));                    // crisp frame
         g.drawRoundedRectangle (band, 4.0f, 1.0f);
+    };
+
+    // ---- Transport/toolbar row as a drop-in module (y=62..104 region) ----
+    drawDropInModule (juce::Rectangle<float> (6.0f, 64.0f, w - 12.0f, 38.0f));
+
+    // ---- Scene row: a raised horizontal drop-in module ----
+    {
+        // The toolbar module ends ~104 and the strip groove is at y=138. Centre
+        // a 26px module in that region (108..134) so a seam shows all around.
+        auto band = juce::Rectangle<float> (6.0f, 108.0f, w - 12.0f, 26.0f);
+        drawDropInModule (band);
 
         // A screw in each end gutter, vertically centred in the band.
         auto bandScrew = [&g] (float cx, float cy)
@@ -1404,7 +1411,7 @@ void MainComponent::paint (juce::Graphics& g)
             g.drawVerticalLine (x + 1, (float) top, (float) bottom);
         };
 
-        int tTop = 32, tBot = 72;
+        int tTop = 70, tBot = 98;   // within the toolbar module face
 
         int d1x = (panicButton.getRight() + recordButton.getX()) / 2;
         int d2x = (stopRecordButton.getRight() + metronomeButton.getX()) / 2;
@@ -2279,9 +2286,9 @@ void MainComponent::resized()
     if (songBar)
         songBar->setBounds (area.removeFromTop (34));
 
-    // Transport row - cassette player style
+    // Transport row — sits inside the drop-in module painted at y=64..102.
     auto transport = area.removeFromTop (48);
-    transport.reduce (8, 6);
+    transport.reduce (12, 8);   // keep buttons within the module face
 
     int bw = toolbarLabelsVisible ? 55 : 36;
     int bwNarrow = toolbarLabelsVisible ? 45 : 36;
