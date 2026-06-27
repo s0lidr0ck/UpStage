@@ -91,14 +91,19 @@ void ChannelStripPanel::paint (juce::Graphics& g)
         int sy = kSlotPadding + i * (kSlotHeight + kSlotPadding);
         auto slotRect = juce::Rectangle<int> (4, sy, getWidth() - 8, kSlotHeight);
 
+        auto fr = slotRect.toFloat();
         if (slots[i].empty)
         {
-            // Empty slot
-            g.setColour (juce::Colour (0xff141414));
-            g.fillRoundedRectangle (slotRect.toFloat(), 3.0f);
-
-            g.setColour (juce::Colour (0xff2a2a2a));
-            g.drawRoundedRectangle (slotRect.toFloat(), 3.0f, 0.5f);
+            // Empty slot = a recessed well: dark floor, top/left inner shadow,
+            // bottom/right catch-light so it looks cut into the panel.
+            g.setColour (juce::Colour (0xff0e0d0c));
+            g.fillRoundedRectangle (fr, 3.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.drawLine (fr.getX() + 2.0f, fr.getY() + 0.7f, fr.getRight() - 2.0f, fr.getY() + 0.7f, 1.3f);
+            g.drawLine (fr.getX() + 0.7f, fr.getY() + 2.0f, fr.getX() + 0.7f, fr.getBottom() - 2.0f, 1.3f);
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.drawLine (fr.getX() + 2.0f, fr.getBottom() - 0.6f, fr.getRight() - 2.0f, fr.getBottom() - 0.6f, 1.0f);
+            g.drawLine (fr.getRight() - 0.6f, fr.getY() + 2.0f, fr.getRight() - 0.6f, fr.getBottom() - 2.0f, 1.0f);
 
             g.setColour (juce::Colour (0xff3a3a3a));
             g.setFont (juce::Font (juce::FontOptions().withHeight (9.0f)));
@@ -106,20 +111,26 @@ void ChannelStripPanel::paint (juce::Graphics& g)
         }
         else
         {
-            // Filled slot
-            auto drawRect = slotRect;
+            // Filled slot = a label card seated IN the well: dark recess border,
+            // then a raised card with a top-lit gradient and bevel.
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.fillRoundedRectangle (fr, 3.0f);
 
-            if (slots[i].tintColour.getAlpha() > 0)
-            {
-                auto tinted = slots[i].bypassed ? slots[i].tintColour.withMultipliedBrightness (0.3f)
-                                                : slots[i].tintColour.withMultipliedBrightness (0.5f);
-                g.setColour (tinted);
-            }
-            else
-            {
-                g.setColour (juce::Colour (0xff222222));
-            }
-            g.fillRoundedRectangle (drawRect.toFloat(), 3.0f);
+            auto card = fr.reduced (1.0f);
+            juce::Colour base = (slots[i].tintColour.getAlpha() > 0)
+                ? (slots[i].bypassed ? slots[i].tintColour.withMultipliedBrightness (0.3f)
+                                     : slots[i].tintColour.withMultipliedBrightness (0.5f))
+                : juce::Colour (0xff2a2a2a);
+            juce::ColourGradient cg (base.brighter (0.18f), card.getCentreX(), card.getY(),
+                                     base.darker (0.22f),    card.getCentreX(), card.getBottom(), false);
+            g.setGradientFill (cg);
+            g.fillRoundedRectangle (card, 2.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.10f));   // top bevel
+            g.drawLine (card.getX() + 2.0f, card.getY() + 0.7f, card.getRight() - 2.0f, card.getY() + 0.7f, 1.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.35f));   // bottom shadow
+            g.drawLine (card.getX() + 2.0f, card.getBottom() - 0.6f, card.getRight() - 2.0f, card.getBottom() - 0.6f, 1.0f);
+
+            auto drawRect = card.toNearestInt();
 
             // Bypass dot
             auto dotArea = drawRect.removeFromLeft (14);

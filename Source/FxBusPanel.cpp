@@ -178,22 +178,40 @@ void FxBusPanel::paint (juce::Graphics& g)
         int sy = slotStartY + i * (kSlotHeight + kSlotPadding);
         auto slotRect = juce::Rectangle<int> (6, sy, getWidth() - 12, kSlotHeight);
 
+        auto fr = slotRect.toFloat();
         if (slots[i].empty)
         {
-            g.setColour (juce::Colour (0xff1a1816));
-            g.fillRoundedRectangle (slotRect.toFloat(), 3.0f);
-            g.setColour (juce::Colour (0xff3a3530));
-            g.drawRoundedRectangle (slotRect.toFloat(), 3.0f, 1.0f);
+            // Recessed well — see ChannelStripPanel for the matching treatment.
+            g.setColour (juce::Colour (0xff100e0c));
+            g.fillRoundedRectangle (fr, 3.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.drawLine (fr.getX() + 2.0f, fr.getY() + 0.7f, fr.getRight() - 2.0f, fr.getY() + 0.7f, 1.3f);
+            g.drawLine (fr.getX() + 0.7f, fr.getY() + 2.0f, fr.getX() + 0.7f, fr.getBottom() - 2.0f, 1.3f);
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.drawLine (fr.getX() + 2.0f, fr.getBottom() - 0.6f, fr.getRight() - 2.0f, fr.getBottom() - 0.6f, 1.0f);
+            g.drawLine (fr.getRight() - 0.6f, fr.getY() + 2.0f, fr.getRight() - 0.6f, fr.getBottom() - 2.0f, 1.0f);
             g.setColour (juce::Colour (0xff4a4540));
             g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
             g.drawText ("Insert " + juce::String (i + 1), slotRect, juce::Justification::centred);
         }
         else
         {
-            g.setColour (juce::Colour (0xff252220));
-            g.fillRoundedRectangle (slotRect.toFloat(), 3.0f);
+            // Seated label card.
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.fillRoundedRectangle (fr, 3.0f);
+            auto card = fr.reduced (1.0f);
+            juce::Colour base (0xff2e2a26);
+            juce::ColourGradient cg (base.brighter (0.18f), card.getCentreX(), card.getY(),
+                                     base.darker (0.22f),    card.getCentreX(), card.getBottom(), false);
+            g.setGradientFill (cg);
+            g.fillRoundedRectangle (card, 2.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.10f));
+            g.drawLine (card.getX() + 2.0f, card.getY() + 0.7f, card.getRight() - 2.0f, card.getY() + 0.7f, 1.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.drawLine (card.getX() + 2.0f, card.getBottom() - 0.6f, card.getRight() - 2.0f, card.getBottom() - 0.6f, 1.0f);
 
-            auto dotRect = slotRect.removeFromLeft (16);
+            auto inner = card.toNearestInt();
+            auto dotRect = inner.removeFromLeft (16);
             auto dotCentre = dotRect.getCentre().toFloat();
             g.setColour (slots[i].bypassed ? juce::Colour (0xff555555) : juce::Colour (0xff27ae60));
             g.fillEllipse (dotCentre.x - 3.0f, dotCentre.y - 3.0f, 6.0f, 6.0f);
@@ -201,7 +219,7 @@ void FxBusPanel::paint (juce::Graphics& g)
             g.setColour (slots[i].bypassed ? juce::Colour (0xff777777) : juce::Colour (0xffcccccc));
             g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
             auto displayName = slots[i].nickname.isNotEmpty() ? slots[i].nickname : slots[i].name;
-            g.drawText (displayName, slotRect.reduced (4, 0), juce::Justification::centredLeft, true);
+            g.drawText (displayName, inner.reduced (4, 0), juce::Justification::centredLeft, true);
         }
     }
 
