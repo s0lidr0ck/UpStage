@@ -695,7 +695,7 @@ public:
         // from the amber input/channel screens.
         juce::Colour litColour = label.findColour (juce::Label::textColourId);
         if (text == "MASTER")
-            litColour = juce::Colour (0xff66e0ff);   // cyan
+            litColour = juce::Colour (0xffaa55cc);   // purple, matching the master knob
         litColour = litColour.brighter (0.25f);      // lift overall brightness
 
         // ---- Recess the screen INTO the panel ----
