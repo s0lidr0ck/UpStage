@@ -1286,7 +1286,50 @@ void MainComponent::paint (juce::Graphics& g)
     };
     drawGroove (28);
     drawGroove (76);
-    drawGroove (104);
+
+    // ---- Scene row: recessed panel band with end screws ----
+    {
+        // Band spans y=110..138 (after menu 28 + songbar 34 + transport 48).
+        auto band = juce::Rectangle<float> (3.0f, 110.0f, w - 6.0f, 28.0f);
+
+        // Recessed sub-panel: dark border, brushed face, top-shadow / bottom-lip.
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillRoundedRectangle (band.expanded (1.0f), 5.0f);
+        juce::ColourGradient pg (juce::Colour (0xff2c2a27), band.getCentreX(), band.getY(),
+                                 juce::Colour (0xff201e1c), band.getCentreX(), band.getBottom(), false);
+        g.setGradientFill (pg);
+        g.fillRoundedRectangle (band, 4.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));      // top inner shadow
+        g.drawHorizontalLine ((int) band.getY() + 1, band.getX() + 3.0f, band.getRight() - 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.05f));     // bottom lip
+        g.drawHorizontalLine ((int) band.getBottom() - 1, band.getX() + 3.0f, band.getRight() - 3.0f);
+
+        // A screw in each end gutter, vertically centred in the band.
+        auto bandScrew = [&g] (float cx, float cy)
+        {
+            const float rad = 5.0f;
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillEllipse (cx - rad - 1.2f, cy - rad - 1.2f, (rad + 1.2f) * 2.0f, (rad + 1.2f) * 2.0f);
+            juce::ColourGradient head (juce::Colour (0xff6e6a62), cx, cy - rad,
+                                       juce::Colour (0xff2a2724), cx, cy + rad, false);
+            head.addColour (0.5, juce::Colour (0xff4a463f));
+            g.setGradientFill (head);
+            g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.8f);
+            auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (35.0f), cx, cy);
+            const float s = rad * 0.72f;
+            juce::Point<float> p1 (cx - s, cy), p2 (cx + s, cy);
+            p1.applyTransform (rot); p2.applyTransform (rot);
+            g.setColour (juce::Colours::black.withAlpha (0.65f));
+            g.drawLine ({ p1, p2 }, 1.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            g.fillEllipse (cx - rad * 0.5f, cy - rad * 0.6f, rad * 0.6f, rad * 0.6f);
+        };
+        float cy = band.getCentreY();
+        bandScrew (band.getX() + 9.0f, cy);
+        bandScrew (band.getRight() - 9.0f, cy);
+    }
 
     // ---- Toolbar group dividers (vertical) ----
     {
@@ -2216,9 +2259,13 @@ void MainComponent::resized()
     transport.removeFromRight (3);
     midiLedLabel.setBounds (transport.removeFromRight (32).reduced (0, 6));
 
-    // Scenes row - all 8 scenes, smaller to fit
-    auto scenesRow = area.removeFromTop (28);
-    scenesRow.reduce (6, 3);
+    // Scenes row — a recessed panel band with side gutters (for end screws)
+    // and even top/bottom padding so the buttons sit centred. Panel + screws
+    // are drawn in paint() using these same insets.
+    auto sceneBand = area.removeFromTop (28);            // full row band
+    auto scenesRow = sceneBand.reduced (0, 5);           // even vertical gutter
+    scenesRow.removeFromLeft (18);                       // left gutter for screw
+    scenesRow.removeFromRight (18);                      // right gutter for screw
     int sceneWidth = (scenesRow.getWidth() - (NUM_SCENES - 1) * 3) / NUM_SCENES;
     for (int i = 0; i < NUM_SCENES; ++i)
     {
