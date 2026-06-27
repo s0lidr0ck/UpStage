@@ -304,8 +304,9 @@ MainComponent::MainComponent() : menuBar (this)
         // Fader level label - tiny and subtle
         faderLevelLabels[i].setText ("0.0 dB", juce::dontSendNotification);
         faderLevelLabels[i].setFont (juce::Font(juce::FontOptions().withHeight(11.0f)));
+        faderLevelLabels[i].setComponentID ("readout");   // recessed LCD readout
         faderLevelLabels[i].setJustificationType (juce::Justification::centred);
-        faderLevelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffaaaaaa));
+        faderLevelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffbfe8c8));
         faderLevelLabels[i].setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
         faderLevelLabels[i].setColour (juce::Label::outlineColourId, juce::Colour (0xff333333));
         faderLevelLabels[i].setEditable (false, true, false);
@@ -527,8 +528,9 @@ MainComponent::MainComponent() : menuBar (this)
     // Input strip fader label
     inputStripFaderLabel.setText ("0.0 dB", juce::dontSendNotification);
     inputStripFaderLabel.setFont (juce::Font(juce::FontOptions().withHeight(11.0f)));
+    inputStripFaderLabel.setComponentID ("readout");   // recessed LCD readout
     inputStripFaderLabel.setJustificationType (juce::Justification::centred);
-    inputStripFaderLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaaaaaa));
+    inputStripFaderLabel.setColour (juce::Label::textColourId, juce::Colour (0xffbfe8c8));
     inputStripFaderLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
     inputStripFaderLabel.setColour (juce::Label::outlineColourId, juce::Colour (0xff333333));
     addAndMakeVisible (inputStripFaderLabel);
