@@ -40,6 +40,7 @@ private:
     juce::TextButton  addFxButton   { "+ Add Insert" };
 
     juce::Slider  masterKnob;
+    juce::Label   masterKnobCaption;  // "VOLUME" caption above the readout
     juce::Label   masterKnobLabel;
 
     VuMeter vuMeterIn  { VuMeter::Theme::Amber };

@@ -280,6 +280,19 @@ public:
                 g.setColour (accentColour);
                 g.strokePath (arcFill, juce::PathStrokeType (3.0f));
             }
+
+            // Center-detent tick at 12 o'clock marks a bipolar (pan) control, so
+            // it reads as a pan knob even when centred (no arc drawn).
+            if (bipolar)
+            {
+                float midAngle = rotaryStartAngle + 0.5f * (rotaryEndAngle - rotaryStartAngle);
+                juce::Point<float> outer (centreX + (radius + 3.0f) * std::sin (midAngle),
+                                          centreY - (radius + 3.0f) * std::cos (midAngle));
+                juce::Point<float> inner (centreX + (radius - 1.0f) * std::sin (midAngle),
+                                          centreY - (radius - 1.0f) * std::cos (midAngle));
+                g.setColour (accentColour.brighter (0.3f));
+                g.drawLine ({ inner, outer }, 2.0f);
+            }
         }
 
         // ---- Knob body - metallic gradient tinted with accent colour ----
@@ -643,6 +656,11 @@ private:
             if (it != knobColorMapPtr->end())
                 return colourForName (it->second);
         }
+
+        // Pan knobs get a distinct amber accent so they read differently from
+        // the blue IN-trim knobs at a glance (they share the "ch" name prefix).
+        if (compID.contains ("pan") || slider.getName().contains ("pan"))
+            return juce::Colour (0xffe2a04a); // amber
 
         // Default by name
         auto name = slider.getName();

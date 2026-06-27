@@ -32,6 +32,12 @@ FxBusPanel::FxBusPanel (FxBus& b)
     masterKnob.addListener (this);
     addAndMakeVisible (masterKnob);
 
+    masterKnobCaption.setText ("VOLUME", juce::dontSendNotification);
+    masterKnobCaption.setFont (juce::Font (juce::FontOptions().withHeight (10.0f).withStyle ("Bold")));
+    masterKnobCaption.setJustificationType (juce::Justification::centred);
+    masterKnobCaption.setColour (juce::Label::textColourId, juce::Colour (0xff998866));
+    addAndMakeVisible (masterKnobCaption);
+
     masterKnobLabel.setText ("0.0 dB", juce::dontSendNotification);
     masterKnobLabel.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
     masterKnobLabel.setJustificationType (juce::Justification::centred);
@@ -228,7 +234,8 @@ void FxBusPanel::resized()
     goniometer.setBounds (strip.removeFromTop (GoniometerMeter::preferredHeight()).reduced (2, 0));
     strip.removeFromTop (4);
 
-    // Master knob label
+    // Master knob caption + dB readout
+    masterKnobCaption.setBounds (strip.removeFromTop (12));
     masterKnobLabel.setBounds (strip.removeFromTop (18));
     strip.removeFromTop (2);
 
