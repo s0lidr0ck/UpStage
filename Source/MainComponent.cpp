@@ -1413,13 +1413,12 @@ void MainComponent::paint (juce::Graphics& g)
 
         int tTop = 70, tBot = 98;   // within the toolbar module face
 
+        // Separate the logical button groups (transport | rec/play/stop | mod).
         int d1x = (panicButton.getRight() + recordButton.getX()) / 2;
         int d2x = (stopRecordButton.getRight() + metronomeButton.getX()) / 2;
-        int d3x = (routingModeButton.getRight() + bpmLabel.getX()) / 2;
 
         drawVDiv (d1x, tTop, tBot);
         drawVDiv (d2x, tTop, tBot);
-        drawVDiv (d3x, tTop, tBot);
     }
 
     // ---- Channel strip backgrounds ----

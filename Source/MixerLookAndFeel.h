@@ -376,20 +376,36 @@ public:
             g.drawHorizontalLine ((int) cavity.getBottom() - 1, cavity.getX() + 2.0f, cavity.getRight() - 2.0f);
         }
 
-        // ---- Button face: raised cap sitting in the cavity ----
-        auto faceRect = isDown ? bounds.reduced (1.5f).translated (0.0f, 1.0f)
+        // ---- Button face: raised cap, or sunken when pressed/active ----
+        auto faceRect = isDown ? bounds.reduced (2.0f).translated (0.0f, 1.0f)
                                : bounds.reduced (1.5f);
 
-        // Multi-stop gradient for plastic/rubber surface
+        // Multi-stop gradient. When down, INVERT it (dark at top) so the face
+        // reads as recessed/pressed-in rather than raised.
         {
-            juce::ColourGradient face (
-                baseColour.brighter (0.35f), faceRect.getCentreX(), faceRect.getY(),
-                baseColour.darker (0.4f),    faceRect.getCentreX(), faceRect.getBottom(), false);
-            face.addColour (0.15, baseColour.brighter (0.15f));
-            face.addColour (0.5,  baseColour);
-            face.addColour (0.85, baseColour.darker (0.25f));
+            juce::ColourGradient face = isDown
+                ? juce::ColourGradient (baseColour.darker (0.45f), faceRect.getCentreX(), faceRect.getY(),
+                                        baseColour.brighter (0.12f), faceRect.getCentreX(), faceRect.getBottom(), false)
+                : juce::ColourGradient (baseColour.brighter (0.35f), faceRect.getCentreX(), faceRect.getY(),
+                                        baseColour.darker (0.4f),    faceRect.getCentreX(), faceRect.getBottom(), false);
+            if (! isDown)
+            {
+                face.addColour (0.15, baseColour.brighter (0.15f));
+                face.addColour (0.5,  baseColour);
+                face.addColour (0.85, baseColour.darker (0.25f));
+            }
             g.setGradientFill (face);
             g.fillRoundedRectangle (faceRect, r);
+
+            // Pressed: inner shadow along the top/left edges (sunken wall).
+            if (isDown)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.5f));
+                g.drawHorizontalLine ((int) faceRect.getY(), faceRect.getX() + 2.0f, faceRect.getRight() - 2.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.28f));
+                g.drawHorizontalLine ((int) faceRect.getY() + 1, faceRect.getX() + 2.0f, faceRect.getRight() - 2.0f);
+                g.drawVerticalLine ((int) faceRect.getX(), faceRect.getY() + 2.0f, faceRect.getBottom() - 2.0f);
+            }
         }
 
         // ---- Surface texture: fine horizontal grain ----
