@@ -549,6 +549,23 @@ MainComponent::MainComponent() : menuBar (this)
     // FX Bus panel
     fxBusPanel = std::make_unique<FxBusPanel> (*fxBus);
     fxBusPanel->onAddPluginClicked = [this] { showAddPluginMenuForFxBus(); };
+    fxBusPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+    {
+        if (auto found = knownPluginList.getTypeForIdentifierString (id))
+        {
+            fxBus->addPlugin (*found, [this, state, bypassed] (bool ok)
+            {
+                if (! ok) return;
+                int slot = fxBus->getNumPlugins() - 1;
+                if (state.getSize() > 0)
+                    if (auto* proc = fxBus->getPlugin (slot))
+                        proc->setStateInformation (state.getData(), (int) state.getSize());
+                fxBus->setPluginBypassed (slot, bypassed);
+                juce::MessageManager::callAsync ([this] { fxBusPanel->refresh(); });
+                projectDirty = true;
+            });
+        }
+    };
     fxBusPanel->onMasterFaderChanged = [this] (float db) {
         masterOutputGain.store (juce::Decibels::decibelsToGain (db), std::memory_order_relaxed);
     };
@@ -3048,6 +3065,7 @@ void MainComponent::loadProjectData (const ProjectData& data)
         fbs.bypassed = data.fxBusState.bypassed;
         fxBus->setState (fbs);
     }
+    fxBusPanel->setAppearances (data.fxBusState.pluginAppearances);
     fxBusPanel->syncFromBus();
 
     // Detect which scene matches the loaded state (if any)
@@ -3304,6 +3322,7 @@ ProjectData MainComponent::collectProjectData() const
     FxBus::State fbs = fxBus->getState();
     data.fxBusState.bypassed = fbs.bypassed;
     data.fxBusState.plugins  = fbs.plugins;
+    data.fxBusState.pluginAppearances = fxBusPanel->getAppearances();
 
     // Knob colors
     data.knobColorMap = knobColorMap;

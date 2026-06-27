@@ -126,6 +126,7 @@ struct ProjectData
     {
         bool  bypassed = false;
         juce::Array<PluginSlotState> plugins;
+        juce::Array<PluginAppearanceState> pluginAppearances;
     };
     FxBusState fxBusState;
 

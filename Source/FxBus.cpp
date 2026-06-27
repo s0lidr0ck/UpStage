@@ -205,6 +205,14 @@ juce::AudioProcessor* FxBus::getPlugin (int index) const
     return nullptr;
 }
 
+juce::String FxBus::getPluginIdentifier (int index) const
+{
+    juce::ScopedLock sl (chainLock);
+    if (juce::isPositiveAndBelow (index, pluginChain.size()))
+        return pluginChain[index]->identifier;
+    return {};
+}
+
 //==============================================================================
 void  FxBus::setBypassed (bool b)  { bypassed.store (b); }
 bool  FxBus::isBypassed()  const   { return bypassed.load(); }

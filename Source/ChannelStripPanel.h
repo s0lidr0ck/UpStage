@@ -29,6 +29,22 @@ public:
     juce::Array<PluginAppearanceState> getAppearances() const;
     void setAppearances (const juce::Array<PluginAppearanceState>& appearances);
 
+    // Plugin copy/paste clipboard — shared across all strip panels (channels and
+    // the master FX bus) so a plugin can be copied from one and pasted into another.
+    struct ClipboardEntry
+    {
+        juce::String pluginIdentifier;
+        juce::String pluginName;
+        juce::MemoryBlock stateData;
+        bool bypassed = false;
+    };
+
+    static ClipboardEntry& getClipboard()
+    {
+        static ClipboardEntry clipboard;
+        return clipboard;
+    }
+
 private:
     struct SlotInfo
     {
@@ -61,20 +77,6 @@ private:
     int  dragTargetSlot = -1;
     bool dragging = false;
     bool doubleClicked = false;
-
-    struct ClipboardEntry
-    {
-        juce::String pluginIdentifier;
-        juce::String pluginName;
-        juce::MemoryBlock stateData;
-        bool bypassed = false;
-    };
-
-    static ClipboardEntry& getClipboard()
-    {
-        static ClipboardEntry clipboard;
-        return clipboard;
-    }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelStripPanel)
 };

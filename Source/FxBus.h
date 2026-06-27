@@ -35,6 +35,7 @@ public:
     bool isPluginBypassed  (int index) const;
     int  getNumPlugins() const;
     juce::AudioProcessor* getPlugin (int index) const;
+    juce::String getPluginIdentifier (int index) const;
 
     //==========================================================================
     void setBypassed (bool b);

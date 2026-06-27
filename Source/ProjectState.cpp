@@ -436,6 +436,13 @@ juce::XmlElement* ProjectState::fxBusStateToXml (const ProjectData::FxBusState& 
             plugEl->setAttribute ("state", b64);
         }
     }
+
+    for (const auto& pas : s.pluginAppearances)
+    {
+        auto* appEl = el->createNewChildElement ("Appearance");
+        appEl->setAttribute ("pluginName", pas.pluginName);
+        appEl->setAttribute ("nickname",   pas.nickname);
+    }
     return el;
 }
 
@@ -446,7 +453,8 @@ bool ProjectState::xmlToFxBusState (const juce::XmlElement* el,
     s.bypassed = el->getIntAttribute ("bypassed", 0) != 0;
 
     s.plugins.clear();
-    for (auto* plugEl : el->getChildIterator())
+    // Iterate only <Plugin> children — <Appearance> children also live here.
+    for (auto* plugEl : el->getChildWithTagNameIterator ("Plugin"))
     {
         PluginSlotState slot;
         slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");
@@ -461,6 +469,15 @@ bool ProjectState::xmlToFxBusState (const juce::XmlElement* el,
             slot.stateData = mos.getMemoryBlock();
         }
         s.plugins.add (slot);
+    }
+
+    s.pluginAppearances.clear();
+    for (auto* appEl : el->getChildWithTagNameIterator ("Appearance"))
+    {
+        PluginAppearanceState pas;
+        pas.pluginName = appEl->getStringAttribute ("pluginName");
+        pas.nickname   = appEl->getStringAttribute ("nickname");
+        s.pluginAppearances.add (pas);
     }
     return true;
 }

@@ -90,10 +90,14 @@ void FxBusPanel::rebuildSlots()
             slots[i].name = (proc != nullptr) ? proc->getName() : "(unknown)";
             slots[i].bypassed = bus.isPluginBypassed (i);
             slots[i].empty = false;
+
+            auto it = pluginAppearance.find (slots[i].name);
+            slots[i].nickname = (it != pluginAppearance.end()) ? it->second.nickname : juce::String();
         }
         else
         {
             slots[i].name = "";
+            slots[i].nickname = "";
             slots[i].bypassed = false;
             slots[i].empty = true;
         }
@@ -190,7 +194,8 @@ void FxBusPanel::paint (juce::Graphics& g)
 
             g.setColour (slots[i].bypassed ? juce::Colour (0xff777777) : juce::Colour (0xffcccccc));
             g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
-            g.drawText (slots[i].name, slotRect.reduced (4, 0), juce::Justification::centredLeft, true);
+            auto displayName = slots[i].nickname.isNotEmpty() ? slots[i].nickname : slots[i].name;
+            g.drawText (displayName, slotRect.reduced (4, 0), juce::Justification::centredLeft, true);
         }
     }
 }
@@ -286,16 +291,36 @@ void FxBusPanel::mouseDown (const juce::MouseEvent& e)
 void FxBusPanel::showSlotContextMenu (int slotIndex)
 {
     juce::PopupMenu menu;
+    bool hasPlugin = slotIndex >= 0 && slotIndex < bus.getNumPlugins() && ! slots[slotIndex].empty;
+    auto& clipboard = ChannelStripPanel::getClipboard();
+    bool clipboardHasData = clipboard.pluginIdentifier.isNotEmpty();
 
-    menu.addItem (1, "Open Editor");
-    menu.addSeparator();
+    if (hasPlugin)
+    {
+        menu.addItem (1, "Open Editor");
+        menu.addItem (6, "Nickname...");
+        menu.addSeparator();
 
-    bool bypassed = bus.isPluginBypassed (slotIndex);
-    menu.addItem (2, bypassed ? "Enable" : "Bypass");
-    menu.addSeparator();
-    menu.addItem (3, "Remove");
+        bool bypassed = bus.isPluginBypassed (slotIndex);
+        menu.addItem (2, bypassed ? "Enable" : "Bypass");
+        menu.addSeparator();
 
-    menu.showMenuAsync ({}, [this, slotIndex] (int result)
+        menu.addItem (10, "Copy");
+        if (clipboardHasData)
+        {
+            bool samePlugin = clipboard.pluginIdentifier == bus.getPluginIdentifier (slotIndex);
+            menu.addItem (11, samePlugin ? "Paste Settings" : "Paste (Replace)");
+        }
+        menu.addSeparator();
+        menu.addItem (3, "Remove");
+    }
+    else
+    {
+        if (clipboardHasData)
+            menu.addItem (11, "Paste");
+    }
+
+    menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
     {
         switch (result)
         {
@@ -311,9 +336,93 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                 bus.removePlugin (slotIndex);
                 refresh();
                 break;
+            case 6:
+                showNicknameDialog (slotIndex);
+                break;
+
+            case 10:
+            {
+                auto* proc = bus.getPlugin (slotIndex);
+                if (proc != nullptr)
+                {
+                    auto& cb = ChannelStripPanel::getClipboard();
+                    cb.pluginIdentifier = bus.getPluginIdentifier (slotIndex);
+                    cb.pluginName = proc->getName();
+                    cb.stateData.reset();
+                    proc->getStateInformation (cb.stateData);
+                    cb.bypassed = bus.isPluginBypassed (slotIndex);
+                }
+                break;
+            }
+
+            case 11:
+            {
+                auto& cb = ChannelStripPanel::getClipboard();
+                // If pasting onto an existing slot of the SAME plugin, just restore
+                // its settings; otherwise add a new instance via the host callback.
+                if (hasPlugin && cb.pluginIdentifier == bus.getPluginIdentifier (slotIndex))
+                {
+                    auto* proc = bus.getPlugin (slotIndex);
+                    if (proc != nullptr && cb.stateData.getSize() > 0)
+                        proc->setStateInformation (cb.stateData.getData(), (int) cb.stateData.getSize());
+                }
+                else if (onPastePlugin)
+                {
+                    onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                }
+                refresh();
+                break;
+            }
             default: break;
         }
     });
+}
+
+void FxBusPanel::showNicknameDialog (int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= bus.getNumPlugins()) return;
+
+    auto* aw = new juce::AlertWindow ("Plugin Nickname",
+                                       "Enter a display name for this plugin.\nLeave blank to use the original name.",
+                                       juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("nickname", slots[slotIndex].nickname, "Nickname:");
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, slotIndex, aw] (int result)
+        {
+            if (result == 1 && slotIndex < bus.getNumPlugins())
+            {
+                auto nick = aw->getTextEditorContents ("nickname").trim();
+                slots[slotIndex].nickname = nick;
+                if (auto* proc = bus.getPlugin (slotIndex))
+                    pluginAppearance[proc->getName()].nickname = nick;
+                refresh();
+            }
+            delete aw;
+        }), true);
+}
+
+juce::Array<PluginAppearanceState> FxBusPanel::getAppearances() const
+{
+    juce::Array<PluginAppearanceState> result;
+    for (const auto& [name, app] : pluginAppearance)
+    {
+        PluginAppearanceState pas;
+        pas.pluginName = name;
+        pas.nickname   = app.nickname;
+        result.add (pas);
+    }
+    return result;
+}
+
+void FxBusPanel::setAppearances (const juce::Array<PluginAppearanceState>& appearances)
+{
+    pluginAppearance.clear();
+    for (const auto& pas : appearances)
+        pluginAppearance[pas.pluginName].nickname = pas.nickname;
+    refresh();
 }
 
 //==============================================================================
