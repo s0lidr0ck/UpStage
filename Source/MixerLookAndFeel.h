@@ -644,22 +644,26 @@ public:
         g.fillRoundedRectangle (bounds.reduced (1.5f), 2.5f);
 
         // ---- Dot grid ----
-        const float dotPitch = 2.6f;             // spacing between dot centres
-        const float dotRadius = 0.95f;
-        auto area = bounds.reduced (4.0f, 3.0f);
+        const float dotPitch = 3.4f;             // spacing between dot centres
+        const float dotRadius = 1.25f;
+        auto area = bounds.reduced (5.0f, 3.0f);
         const int cols = juce::jmax (1, (int) (area.getWidth()  / dotPitch));
         const int rows = juce::jmax (1, (int) (area.getHeight() / dotPitch));
 
-        // Render the text once into a cols x rows coverage mask (cached).
+        // Render the text into a FULL-RESOLUTION mask (supersampled relative to
+        // the dot grid), then sample each dot from it. Rendering straight into a
+        // tiny cols x rows image gives the font almost no pixels and produces
+        // mush — this keeps the glyphs crisp.
+        const int ss = 4;                        // supersample factor per dot cell
+        const int mw = cols * ss, mh = rows * ss;
         if (matrixText != text || matrixCols != cols || matrixRows != rows)
         {
             matrixText = text; matrixCols = cols; matrixRows = rows;
-            matrixMask = juce::Image (juce::Image::ARGB, cols, rows, true);
+            matrixMask = juce::Image (juce::Image::ARGB, mw, mh, true);
             juce::Graphics mg (matrixMask);
             mg.setColour (juce::Colours::white);
-            // Use a bold condensed font sized to fill the row height.
-            mg.setFont (juce::Font (juce::FontOptions ((float) rows * 0.95f).withStyle ("Bold")));
-            mg.drawText (text, 0, 0, cols, rows, juce::Justification::centred, false);
+            mg.setFont (juce::Font (juce::FontOptions ((float) mh * 0.82f).withStyle ("Bold")));
+            mg.drawText (text, 0, 0, mw, mh, juce::Justification::centred, false);
         }
 
         // Centre the grid within the area.
@@ -675,17 +679,24 @@ public:
             {
                 float cx = ox + c * dotPitch;
                 float cy = oy + r * dotPitch;
-                float cov = matrixMask.getPixelAt (c, r).getFloatAlpha();
-                if (cov > 0.4f)
+
+                // Average the ss x ss block of the supersampled mask for this dot.
+                float cov = 0.0f;
+                for (int sy = 0; sy < ss; ++sy)
+                    for (int sx = 0; sx < ss; ++sx)
+                        cov += matrixMask.getPixelAt (c * ss + sx, r * ss + sy).getFloatAlpha();
+                cov /= (float) (ss * ss);
+
+                if (cov > 0.35f)
                 {
-                    g.setColour (litColour.withAlpha (juce::jmin (1.0f, 0.55f + cov * 0.45f)));
+                    g.setColour (litColour.withAlpha (juce::jmin (1.0f, 0.6f + cov * 0.4f)));
                     g.fillEllipse (cx - dotRadius, cy - dotRadius, dotRadius * 2.0f, dotRadius * 2.0f);
                 }
                 else
                 {
                     g.setColour (unlit);
-                    g.fillEllipse (cx - dotRadius * 0.8f, cy - dotRadius * 0.8f,
-                                   dotRadius * 1.6f, dotRadius * 1.6f);
+                    g.fillEllipse (cx - dotRadius * 0.7f, cy - dotRadius * 0.7f,
+                                   dotRadius * 1.4f, dotRadius * 1.4f);
                 }
             }
         }
