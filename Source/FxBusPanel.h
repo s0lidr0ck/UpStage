@@ -5,6 +5,8 @@
 #include "VuMeter.h"
 #include "StereoSpreadMeter.h"
 #include "GoniometerMeter.h"
+#include "ChannelStripPanel.h"   // shared plugin clipboard + PluginAppearanceState
+#include "ProjectState.h"
 
 class FxBusPanel : public juce::Component,
                    public juce::Slider::Listener
@@ -12,6 +14,10 @@ class FxBusPanel : public juce::Component,
 public:
     std::function<void()> onAddPluginClicked;
     std::function<void(float /*dB*/)> onMasterFaderChanged;
+    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed)> onPastePlugin;
+
+    juce::Array<PluginAppearanceState> getAppearances() const;
+    void setAppearances (const juce::Array<PluginAppearanceState>& appearances);
 
     explicit FxBusPanel (FxBus& bus);
     ~FxBusPanel() override;
@@ -40,6 +46,7 @@ private:
     juce::TextButton  addFxButton   { "+ Add Insert" };
 
     juce::Slider  masterKnob;
+    juce::Label   masterKnobCaption;  // "VOLUME" caption above the readout
     juce::Label   masterKnobLabel;
 
     VuMeter vuMeterIn  { VuMeter::Theme::Amber };
@@ -54,11 +61,16 @@ private:
     {
         int index = -1;
         juce::String name;
+        juce::String nickname;
         bool bypassed = false;
         bool empty = true;
     };
 
     SlotInfo slots[FxBus::MAX_FX_SLOTS];
+
+    // Per-plugin nickname keyed by plugin name (mirrors ChannelStripPanel).
+    struct PluginAppearance { juce::String nickname; };
+    std::map<juce::String, PluginAppearance> pluginAppearance;
 
     static constexpr int kSlotHeight = 28;
     static constexpr int kSlotPadding = 2;
@@ -66,6 +78,7 @@ private:
     void rebuildSlots();
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
+    void showNicknameDialog (int slotIndex);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxBusPanel)
 };

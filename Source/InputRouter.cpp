@@ -34,13 +34,13 @@ void InputRouter::fillNextBlock (juce::AudioBuffer<float>& buffer)
 {
     buffer.clear();
 
-    if (mode == Mode::Loop)
+    if (mode.load() == Mode::Loop)
     {
-        if (! loopPlaying) return;
+        if (! loopPlaying.load()) return;
 
         juce::AudioSourceChannelInfo info (&buffer, 0, buffer.getNumSamples());
         resamplingSource.getNextAudioBlock (info);
-        buffer.applyGain (loopVolume);
+        buffer.applyGain (loopVolume.load());
 
         // If transport reached the end, loop it back
         if (transportSource.hasStreamFinished())
@@ -64,6 +64,9 @@ void InputRouter::setMode (Mode m)
     }
 }
 
+// Note: getMode()/isLoopPlaying() read these atomics; transportSource calls
+// remain message-thread only.
+
 bool InputRouter::loadLoopFile (const juce::File& file)
 {
     juce::ScopedLock sl (loaderLock);
@@ -86,7 +89,7 @@ bool InputRouter::loadLoopFile (const juce::File& file)
 void InputRouter::setLoopPlaying (bool shouldPlay)
 {
     loopPlaying = shouldPlay;
-    if (shouldPlay && mode == Mode::Loop)
+    if (shouldPlay && mode.load() == Mode::Loop)
         transportSource.start();
     else
         transportSource.stop();
@@ -94,7 +97,7 @@ void InputRouter::setLoopPlaying (bool shouldPlay)
 
 bool InputRouter::isLoopPlaying() const
 {
-    return loopPlaying && mode == Mode::Loop;
+    return loopPlaying.load() && mode.load() == Mode::Loop;
 }
 
 juce::String InputRouter::getLoopFileName() const

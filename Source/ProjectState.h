@@ -126,6 +126,7 @@ struct ProjectData
     {
         bool  bypassed = false;
         juce::Array<PluginSlotState> plugins;
+        juce::Array<PluginAppearanceState> pluginAppearances;
     };
     FxBusState fxBusState;
 
@@ -137,16 +138,25 @@ struct ProjectData
 };
 
 //==============================================================================
+class SceneManager;
+class MidiLearnManager;
+
 class ProjectState
 {
 public:
     ProjectState();
 
-    /** Save project to a .upstage XML file. Returns true on success. */
-    bool saveToFile (const juce::File& file, const ProjectData& data);
+    /** Save project to a .upstage XML file. Returns true on success.
+        Optionally appends scene and MIDI learn data to the same XML. */
+    bool saveToFile (const juce::File& file, const ProjectData& data,
+                     SceneManager* scenes = nullptr,
+                     MidiLearnManager* midiLearn = nullptr);
 
-    /** Load project from a .upstage XML file. Returns true on success. */
-    bool loadFromFile (const juce::File& file, ProjectData& data);
+    /** Load project from a .upstage XML file. Returns true on success.
+        Optionally restores scene and MIDI learn data from the same XML. */
+    bool loadFromFile (const juce::File& file, ProjectData& data,
+                       SceneManager* scenes = nullptr,
+                       MidiLearnManager* midiLearn = nullptr);
 
     // File dialogs moved to MainComponent (async API in JUCE 7+)
 

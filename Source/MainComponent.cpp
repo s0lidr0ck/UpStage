@@ -4,6 +4,15 @@
 #include <psapi.h>
 
 //==============================================================================
+// Format a -1..+1 pan value as L/C/R text for the knob readout (#2).
+static juce::String panText (double v)
+{
+    int p = juce::roundToInt (v * 100.0);
+    if (p == 0) return "C";
+    return (p < 0 ? "L" : "R") + juce::String (std::abs (p));
+}
+
+//==============================================================================
 MainComponent::MainComponent() : menuBar (this)
 {
     pluginFormatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
@@ -89,16 +98,22 @@ MainComponent::MainComponent() : menuBar (this)
     recordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3a1a1a));
     recordButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffcc4444));
     recordButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffcc2222));
+    recordButton.setTooltip ("Record dry + wet to disk. Right-click: reveal recordings folder.");
 
     stopRecordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2a2a));
+    stopRecordButton.setTooltip ("Stop recording. Right-click: reveal recordings folder.");
 
     metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2a3a));
     metronomeButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff9999cc));
     metronomeButton.addMouseListener (this, false);
+    metronomeButton.setTooltip ("Click: toggle metronome. Right-click: BPM, time sig, "
+                                "subdivision, sound, volume.");
 
     loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
     loopRecButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88cc88));
     loopRecButton.addMouseListener (this, false);
+    loopRecButton.setTooltip ("Click: cycle record/overdub/play. Double-click: overdub. "
+                              "Right-click: count-in, meter, length, capture, export.");
 
     looperProgressLabel.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
     looperProgressLabel.setJustificationType (juce::Justification::centred);
@@ -131,8 +146,7 @@ MainComponent::MainComponent() : menuBar (this)
         });
     };
 
-    routingModeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a3a));
-    routingModeButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88cccc));
+    updateRoutingModeButton();
 
     toolbarExpandButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff252525));
     toolbarExpandButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff888888));
@@ -223,11 +237,13 @@ MainComponent::MainComponent() : menuBar (this)
     for (int i = 0; i < NUM_SCENES; ++i)
     {
         sceneButtons[i].setButtonText ("S" + juce::String (i + 1));
+        sceneButtons[i].setComponentID ("scene_btn");  // dot-matrix LCD rendering
         sceneButtons[i].setColour (juce::TextButton::buttonColourId, juce::Colour (0xff1a1a1a));
         sceneButtons[i].setColour (juce::TextButton::textColourOffId, juce::Colour (0xff555555));
         sceneButtons[i].setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2a5a2a));
         sceneButtons[i].setColour (juce::TextButton::textColourOnId, juce::Colour (0xff88ff88));
-        sceneButtons[i].setTooltip ("Click: recall | Right-click: options");
+        sceneButtons[i].setTooltip ("Click: recall scene. Right-click: save / rename / clear. "
+                                    "Hold numpad 1-8 (3s): save.");
         sceneButtons[i].addListener (this);
         sceneButtons[i].addMouseListener (this, false);
         addAndMakeVisible (sceneButtons[i]);
@@ -240,10 +256,12 @@ MainComponent::MainComponent() : menuBar (this)
     {
         // Channel label - now clickable and editable
         channelLabels[i].setText ("CH " + juce::String(i + 1), juce::dontSendNotification);
+        channelLabels[i].setComponentID ("strip_label");  // dot-matrix LCD rendering
         channelLabels[i].setFont (juce::Font(juce::FontOptions().withHeight(14.0f).withStyle("Bold")));
         channelLabels[i].setJustificationType (juce::Justification::centred);
         channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffcccccc));
-        channelLabels[i].setColour (juce::Label::backgroundColourId, juce::Colour (0xff2a2a2a));
+        // Transparent: the backlit-LCD scribble-strip backing is drawn in paint() (#7).
+        channelLabels[i].setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
         channelLabels[i].setEditable (false, true, false); // single-click to activate, double-click to edit
         channelLabels[i].setMouseCursor (juce::MouseCursor::PointingHandCursor);
         channelLabels[i].setTooltip ("Click: select | Double-click: rename | Drag: reorder");
@@ -331,7 +349,11 @@ MainComponent::MainComponent() : menuBar (this)
         outputGainKnobs[i].setDoubleClickReturnValue (true, 0.0);
         outputGainKnobs[i].onValueChange = [this, i] {
             channels[i]->setPan ((float) outputGainKnobs[i].getValue());
+            showKnobReadout (outputGainKnobs[i], panText (outputGainKnobs[i].getValue()));
         };
+        outputGainKnobs[i].onDragStart = [this, i] {
+            showKnobReadout (outputGainKnobs[i], panText (outputGainKnobs[i].getValue())); };
+        outputGainKnobs[i].onDragEnd = [this] { hideKnobReadout(); };
         addAndMakeVisible (outputGainKnobs[i]);
 
         // Input trim knob label - subtle, small
@@ -354,7 +376,11 @@ MainComponent::MainComponent() : menuBar (this)
         inputTrimKnobs[i].onValueChange = [this, i] {
             float gainDb = (float) inputTrimKnobs[i].getValue();
             channels[i]->setInputGain (juce::Decibels::decibelsToGain (gainDb));
+            showKnobReadout (inputTrimKnobs[i], juce::String (gainDb, 1) + " dB");
         };
+        inputTrimKnobs[i].onDragStart = [this, i] {
+            showKnobReadout (inputTrimKnobs[i], juce::String (inputTrimKnobs[i].getValue(), 1) + " dB"); };
+        inputTrimKnobs[i].onDragEnd = [this] { hideKnobReadout(); };
         addAndMakeVisible (inputTrimKnobs[i]);
 
         // Plugin chain panel
@@ -422,11 +448,10 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Input channel UI
     inputChannelLabel.setText ("INPUT", juce::dontSendNotification);
+    inputChannelLabel.setComponentID ("strip_label");  // dot-matrix LCD rendering
     inputChannelLabel.setFont (juce::Font(juce::FontOptions().withHeight(14.0f).withStyle("Bold")));
     inputChannelLabel.setJustificationType (juce::Justification::centred);
     inputChannelLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffaa66));
-    inputChannelLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff3a2a20));
-    inputChannelLabel.setColour (juce::Label::outlineColourId, juce::Colour (0xff4a3a28));
     addAndMakeVisible (inputChannelLabel);
 
     inputChannelMeterIn = std::make_unique<LevelMeter> (LevelMeter::Orientation::Vertical);
@@ -478,8 +503,26 @@ MainComponent::MainComponent() : menuBar (this)
     inputDirectKnob.setDoubleClickReturnValue (true, 0.0);
     inputDirectKnob.onValueChange = [this] {
         inputDirectLevel.store ((float) inputDirectKnob.getValue(), std::memory_order_relaxed);
+        showKnobReadout (inputDirectKnob,
+            juce::String (juce::roundToInt (inputDirectKnob.getValue() * 100.0)) + "%");
     };
+    inputDirectKnob.onDragStart = [this] {
+        showKnobReadout (inputDirectKnob,
+            juce::String (juce::roundToInt (inputDirectKnob.getValue() * 100.0)) + "%");
+    };
+    inputDirectKnob.onDragEnd = [this] { hideKnobReadout(); };
     addAndMakeVisible (inputDirectKnob);
+
+    // Shared floating value readout (#2) — created hidden, shown on knob turn.
+    knobReadout = std::make_unique<juce::Label>();
+    knobReadout->setJustificationType (juce::Justification::centred);
+    knobReadout->setColour (juce::Label::backgroundColourId, juce::Colour (0xee101010));
+    knobReadout->setColour (juce::Label::textColourId,       juce::Colour (0xffd0f0ff));
+    knobReadout->setColour (juce::Label::outlineColourId,    juce::Colour (0xff3a3a3a));
+    knobReadout->setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+    knobReadout->setInterceptsMouseClicks (false, false);
+    knobReadout->setVisible (false);
+    addChildComponent (knobReadout.get());
 
     // Input strip fader label
     inputStripFaderLabel.setText ("0.0 dB", juce::dontSendNotification);
@@ -507,6 +550,23 @@ MainComponent::MainComponent() : menuBar (this)
     // FX Bus panel
     fxBusPanel = std::make_unique<FxBusPanel> (*fxBus);
     fxBusPanel->onAddPluginClicked = [this] { showAddPluginMenuForFxBus(); };
+    fxBusPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+    {
+        if (auto found = knownPluginList.getTypeForIdentifierString (id))
+        {
+            fxBus->addPlugin (*found, [this, state, bypassed] (bool ok)
+            {
+                if (! ok) return;
+                int slot = fxBus->getNumPlugins() - 1;
+                if (state.getSize() > 0)
+                    if (auto* proc = fxBus->getPlugin (slot))
+                        proc->setStateInformation (state.getData(), (int) state.getSize());
+                fxBus->setPluginBypassed (slot, bypassed);
+                juce::MessageManager::callAsync ([this] { fxBusPanel->refresh(); });
+                projectDirty = true;
+            });
+        }
+    };
     fxBusPanel->onMasterFaderChanged = [this] (float db) {
         masterOutputGain.store (juce::Decibels::decibelsToGain (db), std::memory_order_relaxed);
     };
@@ -551,9 +611,23 @@ MainComponent::MainComponent() : menuBar (this)
     addAndMakeVisible (ramLabel);
 
     //==========================================================================
-    setlistManager.onSongChanged = [this] (int, const ProjectData& data) {
-        juce::MessageManager::callAsync ([this, data]
+    setlistManager.setSceneManager (&sceneManager);
+    setlistManager.setMidiLearnManager (&midiLearnManager);
+    setlistManager.onSongChanged = [this] (int idx, const ProjectData& data) {
+        juce::MessageManager::callAsync ([this, idx, data]
         {
+            auto doLoad = [this, idx, data]
+            {
+                loadProjectData (data);
+
+                if (auto* song = setlistManager.getSong (idx))
+                {
+                    if (song->preferredSceneIndex >= 0)
+                        applySceneWithMute (song->preferredSceneIndex);
+                }
+                if (songBar) songBar->refresh();
+            };
+
             if (projectDirty)
             {
                 auto* aw = new juce::AlertWindow (
@@ -564,20 +638,87 @@ MainComponent::MainComponent() : menuBar (this)
                 aw->addButton ("Don't Save", 2);
                 aw->addButton ("Cancel", 0);
                 aw->enterModalState (true, juce::ModalCallbackFunction::create (
-                    [this, data, aw] (int result)
+                    [doLoad, aw, this] (int result)
                     {
                         if (result == 0) { delete aw; return; }
                         if (result == 1) saveProject();
-                        loadProjectData (data);
+                        doLoad();
                         delete aw;
                     }), false);
             }
             else
             {
-                loadProjectData (data);
+                doLoad();
             }
         });
     };
+
+    //==========================================================================
+    // Song bar (persistent setlist navigation strip)
+    songBar = std::make_unique<SongBar> (setlistManager);
+    songBar->onSongSelected = [this] (int idx)
+    {
+        ProjectData data;
+        if (setlistManager.loadSongAtIndex (idx, data))
+        {
+            loadProjectData (data);
+            if (auto* song = setlistManager.getSong (idx))
+            {
+                if (song->preferredSceneIndex >= 0)
+                    applySceneWithMute (song->preferredSceneIndex);
+            }
+        }
+    };
+    songBar->onOpenSetlist = [this]
+    {
+        auto chooser = std::make_shared<juce::FileChooser> ("Open Setlist", juce::File{}, "*.setlist");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode |
+                              juce::FileBrowserComponent::canSelectFiles,
+            [this, chooser] (const juce::FileChooser& fc)
+            {
+                auto result = fc.getResult();
+                if (result.existsAsFile())
+                {
+                    setlistManager.loadSetlist (result);
+                    SongBar::addToRecentSetlists (result);
+                    ProjectData data;
+                    if (setlistManager.loadSongAtIndex (0, data))
+                        loadProjectData (data);
+                    if (songBar) songBar->refresh();
+                }
+            });
+    };
+    songBar->onSaveSetlist = [this]
+    {
+        auto chooser = std::make_shared<juce::FileChooser> ("Save Setlist", juce::File{}, "*.setlist");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode |
+                              juce::FileBrowserComponent::canSelectFiles,
+            [this, chooser] (const juce::FileChooser& fc)
+            {
+                auto result = fc.getResult();
+                if (result != juce::File{})
+                {
+                    auto f = result.withFileExtension ("setlist");
+                    setlistManager.saveSetlist (f);
+                    SongBar::addToRecentSetlists (f);
+                }
+            });
+    };
+    songBar->onClearSetlist = [this]
+    {
+        setlistManager.clear();
+        if (songBar) songBar->refresh();
+    };
+    songBar->onLoadSetlistFile = [this] (const juce::File& f)
+    {
+        setlistManager.loadSetlist (f);
+        SongBar::addToRecentSetlists (f);
+        ProjectData data;
+        if (setlistManager.loadSongAtIndex (0, data))
+            loadProjectData (data);
+        if (songBar) songBar->refresh();
+    };
+    addAndMakeVisible (*songBar);
 
     //==========================================================================
     // Initialize audio with ASIO support
@@ -636,6 +777,16 @@ MainComponent::MainComponent() : menuBar (this)
         DBG ("No cache file found - will need to scan");
     }
 
+    // Map learnable on-screen controls to their MidiLearnManager paramIDs (#2/#6).
+    learnableControls[&inputTrimSlider]  = "inputTrim";
+    learnableControls[&loopVolumeSlider] = "loopVolume";
+    learnableControls[&gateThreshSlider] = "gateThresh";
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        learnableControls[&outputFaders[i]]    = "chFader" + juce::String (i);
+        learnableControls[&outputGainKnobs[i]] = "chPan"   + juce::String (i);
+    }
+
     setWantsKeyboardFocus (true);
     setSize (640, 1080);
     startTimerHz (30);
@@ -668,6 +819,17 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
 {
     currentSampleRate = sr;
     currentBlockSize  = blockSize;
+
+    // Pre-size real-time scratch buffers to the maximum block size so the audio
+    // callback never has to allocate. setSize with keepExistingContent=false,
+    // clearExtraSpace=true.
+    work        .setSize (2, blockSize, false, true, false);
+    masterMix   .setSize (2, blockSize, false, true, false);
+    directSignal.setSize (2, blockSize, false, true, false);
+    silentBuffer.setSize (2, blockSize, false, true, false);
+    silentBuffer.clear();
+    for (auto& b : channelOutputs)
+        b.setSize (2, blockSize, false, true, false);
 
     inputChannel->prepare (sr, blockSize);
 
@@ -722,8 +884,22 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     juce::ScopedNoDenormals noDenormals;
     auto* buffer = info.buffer;
 
-    // ---- Build working stereo buffer ----
-    juce::AudioBuffer<float> work (2, info.numSamples);
+    // Guard against an over-large or zero block (e.g. device reconfig). The
+    // scratch buffers are sized to currentBlockSize in prepareToPlay().
+    if (info.numSamples <= 0)
+        return;
+    if (info.numSamples > work.getNumSamples())
+    {
+        // Larger than prepared — last-resort grow (rare; avoids OOB writes).
+        work        .setSize (2, info.numSamples, false, true, false);
+        masterMix   .setSize (2, info.numSamples, false, true, false);
+        directSignal.setSize (2, info.numSamples, false, true, false);
+        silentBuffer.setSize (2, info.numSamples, false, true, false);
+        for (auto& b : channelOutputs)
+            b.setSize (2, info.numSamples, false, true, false);
+    }
+
+    // ---- Build working stereo buffer ---- (members; no per-block allocation)
     work.clear();
 
     if (inputRouter.getMode() == InputRouter::Mode::Live)
@@ -772,10 +948,11 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     inputLevelOutR.store (work.getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
     // ---- Save post-input-FX signal for direct mix ----
-    juce::AudioBuffer<float> directSignal;
     float directGain = inputDirectLevel.load (std::memory_order_relaxed);
-    if (directGain > 0.001f)
-        directSignal.makeCopyOf (work);
+    bool  haveDirect = directGain > 0.001f;
+    if (haveDirect)
+        for (int ch = 0; ch < 2; ++ch)
+            directSignal.copyFrom (ch, 0, work, ch, 0, info.numSamples);
 
     // ---- Dry capture (after input FX) ----
     recorder.writeInputBlock (work);
@@ -804,43 +981,7 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
                 }
                 else if (pc < NUM_CHANNELS + NUM_SCENES)
                 {
-                    ChannelStrip* ptrs[NUM_CHANNELS];
-                    for (int i = 0; i < NUM_CHANNELS; ++i) ptrs[i] = channels[i].get();
-                    auto result = sceneManager.applyScene (pc - NUM_CHANNELS, ptrs);
-                    if (result.success)
-                    {
-                        activeSceneIndex = pc - NUM_CHANNELS;
-
-                        noiseGate.enabled     = result.globals.gateEnabled;
-                        noiseGate.thresholdDb = result.globals.gateThreshDb;
-                        gateToggle.setToggleState (result.globals.gateEnabled, juce::dontSendNotification);
-                        gateThreshSlider.setValue (result.globals.gateThreshDb, juce::dontSendNotification);
-                        inputTrimSlider.setValue (result.globals.inputTrimDb, juce::dontSendNotification);
-
-                        FxBus::State fbs;
-                        fbs.bypassed = result.globals.fxBusState.bypassed;
-                        fbs.plugins  = result.globals.fxBusState.plugins;
-                        fxBus->setState (fbs);
-                        fxBusPanel->syncFromBus();
-
-                        for (int i = 0; i < NUM_CHANNELS; ++i)
-                        {
-                            float outDb = juce::Decibels::gainToDecibels (channels[i]->getOutputGain());
-                            float inDb  = juce::Decibels::gainToDecibels (channels[i]->getInputGain());
-                            outputFaders[i].setValue (outDb, juce::dontSendNotification);
-                            outputGainKnobs[i].setValue (channels[i]->getPan(), juce::dontSendNotification);
-                            inputTrimKnobs[i].setValue (inDb, juce::dontSendNotification);
-                            updateFaderLabel (i);
-                            channelStripPanels[i]->refresh();
-                        }
-                    }
-                    midiLearnManager.setParameterTarget ("loopVolume",
-                        (float) loopVolumeSlider.getValue());
-                    midiLearnManager.setParameterTarget ("gateThresh",
-                        noiseGate.thresholdDb);
-                    midiLearnManager.setParameterTarget ("inputTrim",
-                        (float) inputTrimSlider.getValue());
-                    updateSceneButtonStates();
+                    applySceneWithMute (pc - NUM_CHANNELS);
                 }
                 else if (pc == AB_PC_A)
                 {
@@ -868,9 +1009,7 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         midiLearnManager.processMessage (meta.getMessage());
     }
 
-    // ---- Channel processing ----
-    juce::AudioBuffer<float> channelOutputs[NUM_CHANNELS];
-    juce::AudioBuffer<float> masterMix (2, info.numSamples);
+    // ---- Channel processing ---- (channelOutputs/masterMix are members)
     masterMix.clear();
 
     if (! outputMuted)
@@ -909,9 +1048,10 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
                 }
                 else
                 {
-                    juce::AudioBuffer<float> silent (2, info.numSamples);
-                    silent.clear();
-                    channels[i]->processBlock (silent, channelMidi);
+                    // Drive inactive channels with silence so their plugins keep
+                    // their internal state running (reusing the member buffer).
+                    silentBuffer.clear();
+                    channels[i]->processBlock (silentBuffer, channelMidi);
                 }
             }
 
@@ -937,13 +1077,14 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         }
 
         // Mix in direct signal from input channel
-        if (directGain > 0.001f && directSignal.getNumSamples() == info.numSamples)
+        if (haveDirect)
         {
             for (int ch = 0; ch < 2; ++ch)
                 masterMix.addFrom (ch, 0, directSignal, ch, 0, info.numSamples, directGain);
         }
 
-        work.makeCopyOf (masterMix);
+        for (int ch = 0; ch < 2; ++ch)
+            work.copyFrom (ch, 0, masterMix, ch, 0, info.numSamples);
     }
     else
     {
@@ -1113,6 +1254,58 @@ void MainComponent::paint (juce::Graphics& g)
         g.restoreState();
     }
 
+    // ---- Patina: aged sheet-metal discoloration, stains and wear ----
+    // Fixed seed so it never flickers between repaints.
+    {
+        g.saveState();
+        g.reduceClipRegion (getLocalBounds());
+        juce::Random rng (1977);
+
+        // Soft mottled stains — warm (oxidation) and cool (grime) blotches.
+        for (int i = 0; i < 70; ++i)
+        {
+            float bx = rng.nextFloat() * w;
+            float by = rng.nextFloat() * h;
+            float br = 30.0f + rng.nextFloat() * 110.0f;
+            bool warm = rng.nextBool();
+            juce::Colour tint = warm ? juce::Colour (0xff5a4632)   // brownish oxidation
+                                     : juce::Colour (0xff32383a);  // cool grime
+            float a = 0.015f + rng.nextFloat() * 0.03f;
+            juce::ColourGradient blot (tint.withAlpha (a), bx, by,
+                                       tint.withAlpha (0.0f), bx + br, by + br, true);
+            g.setGradientFill (blot);
+            g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
+        }
+
+        // Darker worn/scuffed patches near high-traffic spots.
+        for (int i = 0; i < 30; ++i)
+        {
+            float bx = rng.nextFloat() * w;
+            float by = rng.nextFloat() * h;
+            float br = 12.0f + rng.nextFloat() * 40.0f;
+            float a = 0.02f + rng.nextFloat() * 0.035f;
+            juce::ColourGradient dark (juce::Colours::black.withAlpha (a), bx, by,
+                                       juce::Colours::transparentBlack, bx + br, by + br, true);
+            g.setGradientFill (dark);
+            g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
+        }
+
+        // Fine scratches — faint diagonal hairlines.
+        for (int i = 0; i < 40; ++i)
+        {
+            float sx = rng.nextFloat() * w;
+            float sy = rng.nextFloat() * h;
+            float len = 8.0f + rng.nextFloat() * 50.0f;
+            float ang = (rng.nextFloat() - 0.5f) * 0.6f;  // mostly horizontal
+            float ex = sx + std::cos (ang) * len;
+            float ey = sy + std::sin (ang) * len;
+            g.setColour ((rng.nextBool() ? juce::Colours::white : juce::Colours::black)
+                             .withAlpha (0.025f + rng.nextFloat() * 0.025f));
+            g.drawLine (sx, sy, ex, ey, 0.6f);
+        }
+        g.restoreState();
+    }
+
     // ---- Radial vignette: dark edges, slightly lighter center ----
     {
         float cx = w * 0.5f;
@@ -1144,8 +1337,69 @@ void MainComponent::paint (juce::Graphics& g)
         g.drawHorizontalLine (y + 1, 0.0f, w);
     };
     drawGroove (28);
-    drawGroove (76);
-    drawGroove (104);
+
+    // Draws a raised drop-in module face within a dark seam — the chassis unit
+    // look shared by the toolbar and scene rows.
+    auto drawDropInModule = [&g, w] (juce::Rectangle<float> band)
+    {
+        // Recessed seam/slot the module drops into.
+        g.setColour (juce::Colour (0xff0a0908));
+        g.fillRoundedRectangle (band.expanded (2.0f), 5.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.7f));        // shadow at slot top
+        g.drawHorizontalLine ((int) band.getY() - 2, band.getX() - 1.0f, band.getRight() + 1.0f);
+
+        // Raised module face: top-lit so it sits PROUD of the surface.
+        juce::ColourGradient pg (juce::Colour (0xff353230), band.getCentreX(), band.getY(),
+                                 juce::Colour (0xff211f1d), band.getCentreX(), band.getBottom(), false);
+        pg.addColour (0.45, juce::Colour (0xff2b2926));
+        g.setGradientFill (pg);
+        g.fillRoundedRectangle (band, 4.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));      // top bevel highlight
+        g.drawHorizontalLine ((int) band.getY() + 1, band.getX() + 4.0f, band.getRight() - 4.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.04f));      // left bevel
+        g.drawVerticalLine ((int) band.getX() + 1, band.getY() + 4.0f, band.getBottom() - 4.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));      // bottom shadow edge
+        g.drawHorizontalLine ((int) band.getBottom() - 1, band.getX() + 4.0f, band.getRight() - 4.0f);
+        g.setColour (juce::Colour (0xff4a4640));                    // crisp frame
+        g.drawRoundedRectangle (band, 4.0f, 1.0f);
+    };
+
+    // ---- Transport/toolbar row as a drop-in module (y=62..104 region) ----
+    drawDropInModule (juce::Rectangle<float> (6.0f, 64.0f, w - 12.0f, 38.0f));
+
+    // ---- Scene row: a raised horizontal drop-in module ----
+    {
+        // The toolbar module ends ~104 and the strip groove is at y=138. Centre
+        // a 26px module in that region (108..134) so a seam shows all around.
+        auto band = juce::Rectangle<float> (6.0f, 108.0f, w - 12.0f, 26.0f);
+        drawDropInModule (band);
+
+        // A screw in each end gutter, vertically centred in the band.
+        auto bandScrew = [&g] (float cx, float cy)
+        {
+            const float rad = 5.0f;
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillEllipse (cx - rad - 1.2f, cy - rad - 1.2f, (rad + 1.2f) * 2.0f, (rad + 1.2f) * 2.0f);
+            juce::ColourGradient head (juce::Colour (0xff6e6a62), cx, cy - rad,
+                                       juce::Colour (0xff2a2724), cx, cy + rad, false);
+            head.addColour (0.5, juce::Colour (0xff4a463f));
+            g.setGradientFill (head);
+            g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.8f);
+            auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (35.0f), cx, cy);
+            const float s = rad * 0.72f;
+            juce::Point<float> p1 (cx - s, cy), p2 (cx + s, cy);
+            p1.applyTransform (rot); p2.applyTransform (rot);
+            g.setColour (juce::Colours::black.withAlpha (0.65f));
+            g.drawLine ({ p1, p2 }, 1.5f);
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            g.fillEllipse (cx - rad * 0.5f, cy - rad * 0.6f, rad * 0.6f, rad * 0.6f);
+        };
+        float cy = band.getCentreY();
+        bandScrew (band.getX() + 9.0f, cy);
+        bandScrew (band.getRight() - 9.0f, cy);
+    }
 
     // ---- Toolbar group dividers (vertical) ----
     {
@@ -1157,19 +1411,20 @@ void MainComponent::paint (juce::Graphics& g)
             g.drawVerticalLine (x + 1, (float) top, (float) bottom);
         };
 
-        int tTop = 32, tBot = 72;
+        int tTop = 70, tBot = 98;   // within the toolbar module face
 
+        // Separate the logical button groups (transport | rec/play/stop | mod).
         int d1x = (panicButton.getRight() + recordButton.getX()) / 2;
         int d2x = (stopRecordButton.getRight() + metronomeButton.getX()) / 2;
-        int d3x = (routingModeButton.getRight() + bpmLabel.getX()) / 2;
 
         drawVDiv (d1x, tTop, tBot);
         drawVDiv (d2x, tTop, tBot);
-        drawVDiv (d3x, tTop, tBot);
     }
 
     // ---- Channel strip backgrounds ----
-    const int mixerTop = 104;
+    // Strips begin below the scene-button row: menu(28)+songbar(34)+
+    // transport(48)+scenes(28) = 138. (Using 104 drew them up behind the scenes.)
+    const int mixerTop = 138;
     const int statusBottom = getHeight() - 24;
     const int totalChannels = NUM_CHANNELS + 2;
     const int stripWidth = getWidth() / totalChannels;
@@ -1214,6 +1469,21 @@ void MainComponent::paint (juce::Graphics& g)
         g.drawVerticalLine ((int)x + 1, (float)mixerTop, (float)statusBottom);
     }
 
+    // ---- Horizontal grooves framing the top and bottom of the strip grid ----
+    // Complements the vertical inter-channel separators so the mixer block is
+    // bounded on all sides.
+    {
+        auto fullGroove = [&g, w] (int gy)
+        {
+            g.setColour (juce::Colour (0xff060504));
+            g.drawHorizontalLine (gy, 0.0f, w);
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.drawHorizontalLine (gy + 1, 0.0f, w);
+        };
+        fullGroove (mixerTop);          // top of the strip grid (below scene row)
+        fullGroove (statusBottom - 1);  // bottom of the strip grid (above status bar)
+    }
+
     // ---- Mute overlays on channel strips ----
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
@@ -1226,6 +1496,145 @@ void MainComponent::paint (juce::Graphics& g)
             g.setColour (juce::Colours::black.withAlpha (0.45f));
             g.fillRect (muteRect);
         }
+    }
+
+    // ---- Scribble-strip LCD backing behind each channel label (#7) ----
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        auto lb = channelLabels[i].getBounds().toFloat().reduced (1.0f);
+        const bool isActive = (i == activeChannel);
+        const bool isMuted  = channelMuted[i];
+
+        // Recessed dark-LCD panel; backlight tint reflects state.
+        juce::Colour top = isMuted   ? juce::Colour (0xff2a1414)
+                         : isActive  ? juce::Colour (0xff1d3324)
+                                     : juce::Colour (0xff161a18);
+        juce::Colour bot = top.darker (0.4f);
+        g.setGradientFill (juce::ColourGradient (top, lb.getX(), lb.getY(),
+                                                 bot, lb.getX(), lb.getBottom(), false));
+        g.fillRoundedRectangle (lb, 3.0f);
+
+        // Subtle horizontal scanlines for the LCD feel.
+        g.setColour (juce::Colours::black.withAlpha (0.12f));
+        for (float yy = lb.getY() + 1.0f; yy < lb.getBottom(); yy += 2.0f)
+            g.drawHorizontalLine ((int) yy, lb.getX(), lb.getRight());
+
+        // Recessed bevel.
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.drawRoundedRectangle (lb, 3.0f, 1.0f);
+    }
+
+    // ---- Active-channel frame (#1): unmistakable highlight on selected strip ----
+    if (juce::isPositiveAndBelow (activeChannel, NUM_CHANNELS))
+    {
+        auto r = channelStripBounds[activeChannel].toFloat().reduced (2.0f);
+        const bool muted = channelMuted[activeChannel];
+        juce::Colour accent = muted ? juce::Colour (0xffcc4444)
+                                    : juce::Colour (0xff5fd06a);
+        g.setColour (accent.withAlpha (0.18f));               // soft outer glow
+        g.drawRoundedRectangle (r.expanded (2.0f), 6.0f, 4.0f);
+        g.setColour (accent.withAlpha (0.95f));               // crisp inner frame
+        g.drawRoundedRectangle (r, 6.0f, 2.0f);
+    }
+
+    // ---- Faceplate screws at the ends of each fader slot ----
+    // Drawn here (parent paint) so the fader thumb, a child component, slides
+    // OVER them. Positioned just inside the slot ends (slot has a 12px margin
+    // inside the fader component; see drawLinearSlider).
+    {
+        auto drawScrew = [&g] (float cx, float cy)
+        {
+            const float rad = 6.0f;
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillEllipse (cx - rad - 1.5f, cy - rad - 1.5f, (rad + 1.5f) * 2.0f, (rad + 1.5f) * 2.0f);
+            juce::ColourGradient head (juce::Colour (0xff6e6a62), cx, cy - rad,
+                                       juce::Colour (0xff2a2724), cx, cy + rad, false);
+            head.addColour (0.5, juce::Colour (0xff4a463f));
+            g.setGradientFill (head);
+            g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.8f);
+            auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (35.0f), cx, cy);
+            const float s = rad * 0.72f;
+            juce::Point<float> p1 (cx - s, cy), p2 (cx + s, cy);
+            p1.applyTransform (rot); p2.applyTransform (rot);
+            g.setColour (juce::Colours::black.withAlpha (0.65f));
+            g.drawLine ({ p1, p2 }, 1.6f);
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            g.fillEllipse (cx - rad * 0.5f, cy - rad * 0.6f, rad * 0.6f, rad * 0.6f);
+        };
+
+        const float slotMargin = 12.0f;  // matches drawLinearSlider
+        auto screwsForFader = [&] (const juce::Component& fader)
+        {
+            auto b = fader.getBounds().toFloat();
+            float cx = b.getCentreX();
+            drawScrew (cx, b.getY() + slotMargin);       // top end of slot
+            drawScrew (cx, b.getBottom() - slotMargin);  // bottom end of slot
+        };
+
+        screwsForFader (inputStripFader);
+        for (int i = 0; i < NUM_CHANNELS; ++i)
+            screwsForFader (outputFaders[i]);
+    }
+
+    // ---- Divider separating the channel block from the master section (#8) ----
+    if (fxBusPanel != nullptr)
+    {
+        auto mb = fxBusPanel->getBounds();
+        int x = mb.getX() - 2;
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.drawVerticalLine (x, (float) mb.getY(), (float) mb.getBottom());
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.drawVerticalLine (x + 1, (float) mb.getY(), (float) mb.getBottom());
+    }
+
+    // ---- MIDI-learn state (#6): badge on bound controls; pulse on armed one ----
+    for (const auto& kv : learnableControls)
+    {
+        auto* comp = kv.first;
+        if (comp == nullptr || ! comp->isVisible()) continue;
+        auto area = getLocalArea (comp, comp->getLocalBounds()).toFloat();
+
+        const bool armed = midiLearnManager.isLearning()
+                         && midiLearnManager.getLearningParam() == kv.second;
+        if (armed)
+        {
+            g.setColour (juce::Colour (0xffffaa00).withAlpha (0.85f));
+            g.drawRoundedRectangle (area.reduced (1.0f), 4.0f, 2.0f);
+        }
+        else if (midiLearnManager.getCcForParam (kv.second) >= 0)
+        {
+            g.setColour (juce::Colour (0xff3a78ff).withAlpha (0.9f));  // blue "bound" dot
+            g.fillEllipse (area.getX() + 2.0f, area.getY() + 2.0f, 5.0f, 5.0f);
+        }
+    }
+
+    // ---- Right-click affordance hint (#4): subtle 3-dot marker on scene buttons ----
+    g.setColour (juce::Colours::white.withAlpha (0.18f));
+    for (int i = 0; i < NUM_SCENES; ++i)
+    {
+        auto b = sceneButtons[i].getBounds().toFloat();
+        float x = b.getRight() - 6.0f;
+        float y = b.getY() + 3.0f;
+        for (int d = 0; d < 3; ++d)
+            g.fillEllipse (x, y + d * 2.2f, 1.4f, 1.4f);  // vertical 3-dot
+    }
+
+    // ---- Scene-save hold countdown (#5): radial fill over the held button ----
+    if (heldSceneIndex >= 0 && heldSceneIndex < NUM_SCENES && heldSceneProgress > 0.0f)
+    {
+        auto b = sceneButtons[heldSceneIndex].getBounds().toFloat();
+        auto centre = b.getCentre();
+        float radius = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f - 2.0f;
+        juce::Path arc;
+        arc.addPieSegment (centre.x - radius, centre.y - radius,
+                           radius * 2.0f, radius * 2.0f,
+                           0.0f,
+                           juce::MathConstants<float>::twoPi * heldSceneProgress,
+                           0.0f);
+        g.setColour (juce::Colour (0xff88ff88).withAlpha (0.55f));
+        g.fillPath (arc);
     }
 
     // ---- Status bar: recessed trough ----
@@ -1251,7 +1660,10 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
     {
         if (e.eventComponent == &channelLabels[i])
         {
-            setActiveChannel (i);
+            if (e.mods.isRightButtonDown())
+                showChannelRenameDialog (i);   // right-click: rename
+            else
+                setActiveChannel (i);          // left-click: select
             return;
         }
     }
@@ -1272,18 +1684,7 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
             {
                 if (result == 1)
                 {
-                    ChannelStrip* ptrs[NUM_CHANNELS];
-                    for (int c = 0; c < NUM_CHANNELS; ++c) ptrs[c] = channels[c].get();
-                    SceneManager::GlobalState gs;
-                    gs.gateEnabled  = noiseGate.enabled;
-                    gs.gateThreshDb = noiseGate.thresholdDb;
-                    gs.inputTrimDb  = (float) inputTrimSlider.getValue();
-                    auto fbs = fxBus->getState();
-                    gs.fxBusState.bypassed = fbs.bypassed;
-                    gs.fxBusState.plugins  = fbs.plugins;
-                    sceneManager.captureScene (i, ptrs, gs);
-                    updateSceneButtonStates();
-                    projectDirty = true;
+                    captureSceneFromCurrent (i);
                 }
                 else if (result == 2)
                 {
@@ -1334,7 +1735,8 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // Edit mode: right-click knobs to change color
+    // Edit mode: right-click knobs to change color (color menu also offers
+    // Learn MIDI for learnable knobs via showKnobColorMenu).
     if (uiEditMode && e.mods.isRightButtonDown())
     {
         for (int i = 0; i < NUM_CHANNELS; ++i)
@@ -1344,6 +1746,26 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
                 showKnobColorMenu (e.eventComponent);
                 return;
             }
+        }
+    }
+
+    // Right-click any other registered learnable control → Learn / Clear MIDI (#6).
+    if (e.mods.isRightButtonDown())
+    {
+        const juce::String pid = paramIdForComponent (e.eventComponent);
+        if (pid.isNotEmpty())
+        {
+            const bool armed = midiLearnManager.isLearning()
+                             && midiLearnManager.getLearningParam() == pid;
+            juce::PopupMenu m;
+            m.addItem (1, armed ? "Listening for CC..." : "Learn MIDI");
+            m.addItem (2, "Clear MIDI binding", midiLearnManager.getCcForParam (pid) >= 0);
+            m.showMenuAsync ({}, [this, pid] (int r)
+            {
+                if (r == 1) { midiLearnManager.beginLearning (pid); repaint(); }
+                else if (r == 2) { midiLearnManager.clearBinding (pid); repaint(); }
+            });
+            return;
         }
     }
 
@@ -1707,6 +2129,14 @@ void MainComponent::swapChannels (int a, int b)
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
+    // Ctrl+Shift+S = Save as Song
+    if (key.getModifiers().isCommandDown() && key.getModifiers().isShiftDown()
+        && key.getKeyCode() == 'S')
+    {
+        saveSongState();
+        return true;
+    }
+
     // Ctrl+S = Save
     if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'S')
     {
@@ -1754,7 +2184,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    // Numpad 1-8: after Numpad 9 prefix, 1-4 switches channel; otherwise recall scene
+    // Numpad 1-8: after Numpad 9 prefix, 1-4 switches channel;
+    // otherwise begin hold detection (scene recall on release, save on 3s hold)
     for (int n = 1; n <= 8; ++n)
     {
         if (key.getKeyCode() == juce::KeyPress::numberPad0 + n)
@@ -1765,49 +2196,25 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
                 if (n >= 1 && n <= NUM_CHANNELS)
                     setActiveChannel (n - 1);
             }
-            else
+            else if (heldSceneIndex < 0)
             {
-                int sceneIdx = n - 1;
-                ChannelStrip* ptrs[NUM_CHANNELS];
-                for (int c = 0; c < NUM_CHANNELS; ++c) ptrs[c] = channels[c].get();
-                auto result = sceneManager.applyScene (sceneIdx, ptrs);
-                if (result.success)
-                {
-                    activeSceneIndex = sceneIdx;
-
-                    noiseGate.enabled     = result.globals.gateEnabled;
-                    noiseGate.thresholdDb = result.globals.gateThreshDb;
-                    gateToggle.setToggleState (result.globals.gateEnabled, juce::dontSendNotification);
-                    gateThreshSlider.setValue (result.globals.gateThreshDb, juce::dontSendNotification);
-                    inputTrimSlider.setValue (result.globals.inputTrimDb, juce::dontSendNotification);
-
-                    FxBus::State fbs;
-                    fbs.bypassed = result.globals.fxBusState.bypassed;
-                    fbs.plugins  = result.globals.fxBusState.plugins;
-                    fxBus->setState (fbs);
-                    fxBusPanel->syncFromBus();
-
-                    for (int c = 0; c < NUM_CHANNELS; ++c)
-                    {
-                        float outDb = juce::Decibels::gainToDecibels (channels[c]->getOutputGain());
-                        float inDb  = juce::Decibels::gainToDecibels (channels[c]->getInputGain());
-                        outputFaders[c].setValue (outDb, juce::dontSendNotification);
-                        outputGainKnobs[c].setValue (channels[c]->getPan(), juce::dontSendNotification);
-                        inputTrimKnobs[c].setValue (inDb, juce::dontSendNotification);
-                        updateFaderLabel (c);
-                        channelStripPanels[c]->refresh();
-                    }
-                    midiLearnManager.setParameterTarget ("loopVolume",
-                        (float) loopVolumeSlider.getValue());
-                    midiLearnManager.setParameterTarget ("gateThresh",
-                        noiseGate.thresholdDb);
-                    midiLearnManager.setParameterTarget ("inputTrim",
-                        (float) inputTrimSlider.getValue());
-                    updateSceneButtonStates();
-                }
+                heldSceneIndex = n - 1;
+                holdStartMs = juce::Time::getMillisecondCounter();
             }
             return true;
         }
+    }
+
+    // Numpad + / - for setlist navigation
+    if (key.getKeyCode() == juce::KeyPress::numberPadAdd)
+    {
+        setlistManager.advance();
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::numberPadSubtract)
+    {
+        setlistManager.previous();
+        return true;
     }
 
     return false;
@@ -1821,17 +2228,33 @@ bool MainComponent::keyStateChanged (bool /*isKeyDown*/)
 void MainComponent::showKnobColorMenu (juce::Component* knob)
 {
     juce::PopupMenu menu;
-    menu.addItem (1, "Grey");
-    menu.addItem (2, "Blue");
-    menu.addItem (3, "Green");
-    menu.addItem (4, "Purple");
-    menu.addItem (5, "Red");
-    menu.addItem (6, "Royal Blue");
-    menu.addItem (7, "Teal");
+    juce::PopupMenu colourMenu;
+    colourMenu.addItem (1, "Grey");
+    colourMenu.addItem (2, "Blue");
+    colourMenu.addItem (3, "Green");
+    colourMenu.addItem (4, "Purple");
+    colourMenu.addItem (5, "Red");
+    colourMenu.addItem (6, "Royal Blue");
+    colourMenu.addItem (7, "Teal");
+    menu.addSubMenu ("Colour", colourMenu);
 
-    menu.showMenuAsync ({}, [this, knob] (int result)
+    // If this control is MIDI-learnable, offer learn/clear here too (#6).
+    const juce::String pid = paramIdForComponent (knob);
+    if (pid.isNotEmpty())
+    {
+        const bool armed = midiLearnManager.isLearning()
+                         && midiLearnManager.getLearningParam() == pid;
+        menu.addSeparator();
+        menu.addItem (100, armed ? "Listening for CC..." : "Learn MIDI");
+        menu.addItem (101, "Clear MIDI binding", midiLearnManager.getCcForParam (pid) >= 0);
+    }
+
+    menu.showMenuAsync ({}, [this, knob, pid] (int result)
     {
         if (result <= 0) return;
+
+        if (result == 100) { midiLearnManager.beginLearning (pid); repaint(); return; }
+        if (result == 101) { midiLearnManager.clearBinding  (pid); repaint(); return; }
 
         juce::String colorName;
         switch (result)
@@ -1858,9 +2281,13 @@ void MainComponent::resized()
     // Menu bar
     menuBar.setBounds (area.removeFromTop (28));
 
-    // Transport row - cassette player style
+    // Song bar (setlist navigation strip)
+    if (songBar)
+        songBar->setBounds (area.removeFromTop (34));
+
+    // Transport row — sits inside the drop-in module painted at y=64..102.
     auto transport = area.removeFromTop (48);
-    transport.reduce (8, 6);
+    transport.reduce (12, 8);   // keep buttons within the module face
 
     int bw = toolbarLabelsVisible ? 55 : 36;
     int bwNarrow = toolbarLabelsVisible ? 45 : 36;
@@ -1892,7 +2319,7 @@ void MainComponent::resized()
     transport.removeFromLeft (1);
     looperProgressLabel.setBounds (transport.removeFromLeft (58).reduced (0, 4));
     transport.removeFromLeft (3);
-    routingModeButton.setBounds (transport.removeFromLeft (bwNarrow));
+    routingModeButton.setBounds (transport.removeFromLeft (78));  // wide enough for "PARALLEL"
 
     // Tap tempo - far right
     tapButton.setBounds (transport.removeFromRight (bwNarrow));
@@ -1901,9 +2328,16 @@ void MainComponent::resized()
     transport.removeFromRight (3);
     midiLedLabel.setBounds (transport.removeFromRight (32).reduced (0, 6));
 
-    // Scenes row - all 8 scenes, smaller to fit
-    auto scenesRow = area.removeFromTop (28);
-    scenesRow.reduce (6, 3);
+    // Scenes row — a recessed panel band with side gutters (for end screws)
+    // and even top/bottom padding so the buttons sit centred. Panel + screws
+    // are drawn in paint() using these same insets.
+    auto sceneBand = area.removeFromTop (28);            // reserves y=110..138
+    // Buttons sit inside the raised module face (painted at y=108..134); inset
+    // to 111..131 so the module's bevel shows around them.
+    auto scenesRow = juce::Rectangle<int> (sceneBand.getX(), 111,
+                                           sceneBand.getWidth(), 20);
+    scenesRow.removeFromLeft (20);                       // left gutter for screw
+    scenesRow.removeFromRight (20);                      // right gutter for screw
     int sceneWidth = (scenesRow.getWidth() - (NUM_SCENES - 1) * 3) / NUM_SCENES;
     for (int i = 0; i < NUM_SCENES; ++i)
     {
@@ -1973,7 +2407,9 @@ void MainComponent::resized()
 
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
-        auto strip = area.removeFromLeft (stripWidth).reduced (stripPadding);
+        auto fullStrip = area.removeFromLeft (stripWidth);
+        channelStripBounds[i] = fullStrip;   // exact column this strip occupies (#1/#7)
+        auto strip = fullStrip.reduced (stripPadding);
 
         // Channel label at top
         channelLabels[i].setBounds (strip.removeFromTop (28));
@@ -2162,9 +2598,7 @@ void MainComponent::buttonClicked (juce::Button* b)
     else if (b == &routingModeButton)
     {
         parallelRouting = ! parallelRouting;
-        routingModeButton.setButtonText (parallelRouting ? ">>" : ">");
-        routingModeButton.setColour (juce::TextButton::buttonColourId,
-            parallelRouting ? juce::Colour (0xff2a3a3a) : juce::Colour (0xff3a3a2a));
+        updateRoutingModeButton();
     }
 
     // Toolbar expand
@@ -2193,64 +2627,12 @@ void MainComponent::buttonClicked (juce::Button* b)
     {
         if (b == &sceneButtons[i])
         {
-            ChannelStrip* ptrs[NUM_CHANNELS];
-            for (int c = 0; c < NUM_CHANNELS; ++c) ptrs[c] = channels[c].get();
-            auto result = sceneManager.applyScene (i, ptrs);
-            if (! result.success)
-                return;
-
-            activeSceneIndex = i;
-
-            // Apply global state
-            noiseGate.enabled     = result.globals.gateEnabled;
-            noiseGate.thresholdDb = result.globals.gateThreshDb;
-            gateToggle.setToggleState (result.globals.gateEnabled, juce::dontSendNotification);
-            gateThreshSlider.setValue (result.globals.gateThreshDb, juce::dontSendNotification);
-            inputTrimSlider.setValue (result.globals.inputTrimDb, juce::dontSendNotification);
-
-            // Restore FxBus state
-            FxBus::State fbs;
-            fbs.bypassed = result.globals.fxBusState.bypassed;
-            fbs.plugins  = result.globals.fxBusState.plugins;
-            fxBus->setState (fbs);
-            fxBusPanel->syncFromBus();
-
-            // Sync UI to new channel states
-            for (int c = 0; c < NUM_CHANNELS; ++c)
-            {
-                float outGainDb = juce::Decibels::gainToDecibels (channels[c]->getOutputGain());
-                float inGainDb  = juce::Decibels::gainToDecibels (channels[c]->getInputGain());
-                outputFaders[c].setValue (outGainDb, juce::dontSendNotification);
-                outputGainKnobs[c].setValue (channels[c]->getPan(), juce::dontSendNotification);
-                inputTrimKnobs[c].setValue (inGainDb, juce::dontSendNotification);
-                updateFaderLabel (c);
-                channelStripPanels[c]->refresh();
-            }
-
-            // Arm soft takeover after scene recall
-            midiLearnManager.setParameterTarget ("loopVolume",
-                (float) loopVolumeSlider.getValue());
-            midiLearnManager.setParameterTarget ("gateThresh",
-                noiseGate.thresholdDb);
-            midiLearnManager.setParameterTarget ("inputTrim",
-                (float) inputTrimSlider.getValue());
-            updateSceneButtonStates();
+            applySceneWithMute (i);
             return;
         }
         if (b == &saveSceneButtons[i])
         {
-            ChannelStrip* ptrs[NUM_CHANNELS];
-            for (int c = 0; c < NUM_CHANNELS; ++c) ptrs[c] = channels[c].get();
-            SceneManager::GlobalState gs;
-            gs.gateEnabled  = noiseGate.enabled;
-            gs.gateThreshDb = noiseGate.thresholdDb;
-            gs.inputTrimDb  = (float) inputTrimSlider.getValue();
-            auto fbs = fxBus->getState();
-            gs.fxBusState.bypassed = fbs.bypassed;
-            gs.fxBusState.plugins  = fbs.plugins;
-            sceneManager.captureScene (i, ptrs, gs);
-            updateSceneButtonStates();
-            projectDirty = true;
+            captureSceneFromCurrent (i);
             return;
         }
     }
@@ -2278,6 +2660,23 @@ void MainComponent::timerCallback()
     // Update input channel meters
     inputChannelMeterIn->pushLevel (inputLevelInL.load(), inputLevelInR.load());
     inputChannelMeterOut->pushLevel (inputLevelOutL.load(), inputLevelOutR.load());
+
+    // MIDI-learn (#6): keep the armed-control pulse animating, and refresh
+    // CC tooltips a few times per second (cheap, reflects new bindings).
+    if (midiLearnManager.isLearning())
+        repaint();
+    if (++midiBadgeTick >= 15)
+    {
+        midiBadgeTick = 0;
+        for (const auto& kv : learnableControls)
+        {
+            int cc = midiLearnManager.getCcForParam (kv.second);
+            if (cc < 0) continue;  // leave the control's own descriptive tooltip intact
+            if (auto* s = dynamic_cast<juce::SettableTooltipClient*> (kv.first))
+                s->setTooltip ("MIDI: CC " + juce::String (cc) + " ch "
+                    + juce::String (midiLearnManager.getChannelForParam (kv.second)));
+        }
+    }
 
     // Update regular channel meters
     for (int i = 0; i < NUM_CHANNELS; ++i)
@@ -2307,6 +2706,42 @@ void MainComponent::timerCallback()
         if (--metroFlashCounter == 0)
             metronomeButton.setColour (juce::TextButton::buttonColourId,
                 metronome.isEnabled() ? juce::Colour (0xff4444aa) : juce::Colour (0xff2a2a3a));
+    }
+
+    // Scene save flash
+    if (sceneFlashCounter > 0)
+    {
+        if (--sceneFlashCounter == 0)
+        {
+            sceneFlashIndex = -1;
+            updateSceneButtonStates();
+        }
+    }
+
+    // Hold-to-save: save immediately at 3s threshold, recall on early release
+    if (heldSceneIndex >= 0)
+    {
+        int heldKeyCode = juce::KeyPress::numberPad0 + heldSceneIndex + 1;
+        auto heldMs = juce::Time::getMillisecondCounter() - holdStartMs;
+
+        heldSceneProgress = juce::jlimit (0.0f, 1.0f, (float) heldMs / 3000.0f);
+        repaint();  // animate the countdown arc (#5)
+
+        if (heldMs >= 3000)
+        {
+            int sceneIdx = heldSceneIndex;
+            heldSceneIndex = -1;
+            heldSceneProgress = 0.0f;
+            captureSceneFromCurrent (sceneIdx);
+            flashSceneButton (sceneIdx);
+        }
+        else if (! juce::KeyPress::isKeyCurrentlyDown (heldKeyCode))
+        {
+            int sceneIdx = heldSceneIndex;
+            heldSceneIndex = -1;
+            heldSceneProgress = 0.0f;
+            applySceneWithMute (sceneIdx);
+        }
     }
 
     // Looper visual feedback
@@ -2669,7 +3104,7 @@ void MainComponent::openProject()
             if (result.existsAsFile())
             {
                 ProjectData data;
-                if (projectState.loadFromFile (result, data))
+                if (projectState.loadFromFile (result, data, &sceneManager, &midiLearnManager))
                 {
                     currentProjectFile = result;
                     loadProjectData (data);
@@ -2683,7 +3118,7 @@ void MainComponent::saveProject()
 {
     if (! currentProjectFile.existsAsFile()) { saveProjectAs(); return; }
     auto data = collectProjectData();
-    if (projectState.saveToFile (currentProjectFile, data))
+    if (projectState.saveToFile (currentProjectFile, data, &sceneManager, &midiLearnManager))
     {
         projectDirty = false;
         saveLastProjectPath();
@@ -2707,7 +3142,7 @@ void MainComponent::saveProjectAs()
             if (result != juce::File{})
             {
                 auto file = result.withFileExtension ("upstage");
-                if (projectState.saveToFile (file, data))
+                if (projectState.saveToFile (file, data, &sceneManager, &midiLearnManager))
                 {
                     currentProjectFile = file;
                     projectDirty = false;
@@ -2721,12 +3156,20 @@ void MainComponent::saveProjectAs()
 
 void MainComponent::loadProjectData (const ProjectData& data)
 {
+    // Show loading overlay immediately
+    loadingOverlay.show (this, "Loading project...");
+
+    // Count total plugins to load async
+    pendingPluginLoads = 0;
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+        pendingPluginLoads += data.channels[i].plugins.size();
+    pendingPluginLoads += data.inputChannelState.plugins.size();
+    pendingPluginLoads += data.fxBusState.plugins.size();
+
     currentProject = data;
     setActiveChannel (data.activeChannel);
     parallelRouting = data.parallelRouting;
-    routingModeButton.setButtonText (parallelRouting ? ">>" : ">");
-    routingModeButton.setColour (juce::TextButton::buttonColourId,
-        parallelRouting ? juce::Colour (0xff2a3a3a) : juce::Colour (0xff3a3a2a));
+    updateRoutingModeButton();
     midiTranslator.setRules (data.midiRules);
     tapTempo.setBPM (data.tapTempoBPM);
 
@@ -2775,7 +3218,13 @@ void MainComponent::loadProjectData (const ProjectData& data)
                                juce::dontSendNotification);
     }
 
-    // Load channel plugins
+    // Clear existing plugin chains
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+        channels[i]->clearAllPlugins();
+    inputChannel->clearAllPlugins();
+    fxBus->clearAllPlugins();
+
+    // Set channel params (no plugin loading yet)
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
         channels[i]->setActive     (i == data.activeChannel);
@@ -2785,105 +3234,20 @@ void MainComponent::loadProjectData (const ProjectData& data)
         channels[i]->setPan        (data.channels[i].pan);
         outputGainKnobs[i].setValue (data.channels[i].pan, juce::dontSendNotification);
         channelStripPanels[i]->setAppearances (data.channels[i].pluginAppearances);
-
-        for (int slotIndex = 0; slotIndex < data.channels[i].plugins.size(); ++slotIndex)
-        {
-            const auto& slot = data.channels[i].plugins.getReference (slotIndex);
-            juce::PluginDescription desc;
-            if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
-                desc = *found;
-            else
-            {
-                desc.pluginFormatName = "VST3";
-                desc.fileOrIdentifier = slot.pluginIdentifier;
-                desc.name             = slot.pluginName;
-            }
-
-            juce::MemoryBlock stateBlob = slot.stateData;
-            bool bypassed   = slot.isBypassed;
-            int  chanIdx    = i;
-            int  slotIdx    = slotIndex;
-
-            channels[i]->addPlugin (desc, [this, chanIdx, slotIdx, stateBlob, bypassed] (bool ok)
-            {
-                if (! ok) return;
-                if (stateBlob.getSize() > 0)
-                    if (auto* proc = channels[chanIdx]->getPlugin (slotIdx))
-                        proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
-                channels[chanIdx]->setPluginBypassed (slotIdx, bypassed);
-                juce::MessageManager::callAsync ([this, chanIdx] {
-                    channelStripPanels[chanIdx]->refresh();
-                });
-            });
-        }
     }
 
-    // Restore input channel plugins
     inputChannel->setInputGain (data.inputChannelState.inputGain);
     inputChannel->setOutputGain (data.inputChannelState.outputGain);
     inputDirectLevel.store (data.inputDirectMix, std::memory_order_relaxed);
     inputDirectKnob.setValue (data.inputDirectMix, juce::dontSendNotification);
-    for (int slotIndex = 0; slotIndex < data.inputChannelState.plugins.size(); ++slotIndex)
-    {
-        const auto& slot = data.inputChannelState.plugins.getReference (slotIndex);
-        juce::PluginDescription desc;
-        if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
-            desc = *found;
-        else
-        {
-            desc.pluginFormatName = "VST3";
-            desc.fileOrIdentifier = slot.pluginIdentifier;
-            desc.name             = slot.pluginName;
-        }
-        juce::MemoryBlock stateBlob = slot.stateData;
-        bool bypassed = slot.isBypassed;
-        int slotIdx = slotIndex;
 
-        inputChannel->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
-        {
-            if (! ok) return;
-            if (stateBlob.getSize() > 0)
-                if (auto* proc = inputChannel->getPlugin (slotIdx))
-                    proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
-            inputChannel->setPluginBypassed (slotIdx, bypassed);
-            juce::MessageManager::callAsync ([this] { inputChannelPanel->refresh(); });
-        });
-    }
-
-    // Restore master insert chain state
     {
         FxBus::State fbs;
         fbs.bypassed = data.fxBusState.bypassed;
         fxBus->setState (fbs);
     }
+    fxBusPanel->setAppearances (data.fxBusState.pluginAppearances);
     fxBusPanel->syncFromBus();
-
-    for (int slotIndex = 0; slotIndex < data.fxBusState.plugins.size(); ++slotIndex)
-    {
-        const auto& slot = data.fxBusState.plugins.getReference (slotIndex);
-        juce::PluginDescription desc;
-        if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
-            desc = *found;
-        else
-        {
-            desc.pluginFormatName = "VST3";
-            desc.fileOrIdentifier = slot.pluginIdentifier;
-            desc.name             = slot.pluginName;
-        }
-        juce::MemoryBlock stateBlob = slot.stateData;
-        bool bypassed               = slot.isBypassed;
-        int  slotIdx                = slotIndex;
-
-        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
-        {
-            if (! ok) return;
-            if (stateBlob.getSize() > 0)
-                if (auto* proc = fxBus->getPlugin (slotIdx))
-                    proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
-            fxBus->setPluginBypassed (slotIdx, bypassed);
-            juce::MessageManager::callAsync ([this] { fxBusPanel->refresh(); });
-        });
-    }
 
     // Detect which scene matches the loaded state (if any)
     activeSceneIndex = -1;
@@ -2919,6 +3283,195 @@ void MainComponent::loadProjectData (const ProjectData& data)
     updateSceneButtonStates();
     updateTransportUI();
     updateStatusBar();
+
+    // Defer plugin loading to the next message loop pass so the overlay paints first
+    if (pendingPluginLoads > 0)
+    {
+        auto dataCopy = data;
+        juce::MessageManager::callAsync ([this, dataCopy] { loadProjectPlugins (dataCopy); });
+    }
+    else
+    {
+        loadingOverlay.dismiss();
+    }
+}
+
+void MainComponent::loadProjectPlugins (const ProjectData& data)
+{
+    // Load channel plugins
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        for (int slotIndex = 0; slotIndex < data.channels[i].plugins.size(); ++slotIndex)
+        {
+            const auto& slot = data.channels[i].plugins.getReference (slotIndex);
+            juce::PluginDescription desc;
+            if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
+                desc = *found;
+            else
+            {
+                desc.pluginFormatName = "VST3";
+                desc.fileOrIdentifier = slot.pluginIdentifier;
+                desc.name             = slot.pluginName;
+            }
+
+            juce::MemoryBlock stateBlob = slot.stateData;
+            bool bypassed   = slot.isBypassed;
+            int  chanIdx    = i;
+            int  slotIdx    = slotIndex;
+
+            channels[i]->addPlugin (desc, [this, chanIdx, slotIdx, stateBlob, bypassed] (bool ok)
+            {
+                if (ok)
+                {
+                    if (stateBlob.getSize() > 0)
+                        if (auto* proc = channels[chanIdx]->getPlugin (slotIdx))
+                            proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
+                    channels[chanIdx]->setPluginBypassed (slotIdx, bypassed);
+                }
+                juce::MessageManager::callAsync ([this, chanIdx] {
+                    channelStripPanels[chanIdx]->refresh();
+                    if (--pendingPluginLoads <= 0)
+                        loadingOverlay.dismiss();
+                });
+            });
+        }
+    }
+
+    // Load input channel plugins
+    for (int slotIndex = 0; slotIndex < data.inputChannelState.plugins.size(); ++slotIndex)
+    {
+        const auto& slot = data.inputChannelState.plugins.getReference (slotIndex);
+        juce::PluginDescription desc;
+        if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
+            desc = *found;
+        else
+        {
+            desc.pluginFormatName = "VST3";
+            desc.fileOrIdentifier = slot.pluginIdentifier;
+            desc.name             = slot.pluginName;
+        }
+        juce::MemoryBlock stateBlob = slot.stateData;
+        bool bypassed = slot.isBypassed;
+        int slotIdx = slotIndex;
+
+        inputChannel->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
+        {
+            if (ok)
+            {
+                if (stateBlob.getSize() > 0)
+                    if (auto* proc = inputChannel->getPlugin (slotIdx))
+                        proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
+                inputChannel->setPluginBypassed (slotIdx, bypassed);
+            }
+            juce::MessageManager::callAsync ([this] {
+                inputChannelPanel->refresh();
+                if (--pendingPluginLoads <= 0)
+                    loadingOverlay.dismiss();
+            });
+        });
+    }
+
+    // Load master FX bus plugins
+    for (int slotIndex = 0; slotIndex < data.fxBusState.plugins.size(); ++slotIndex)
+    {
+        const auto& slot = data.fxBusState.plugins.getReference (slotIndex);
+        juce::PluginDescription desc;
+        if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
+            desc = *found;
+        else
+        {
+            desc.pluginFormatName = "VST3";
+            desc.fileOrIdentifier = slot.pluginIdentifier;
+            desc.name             = slot.pluginName;
+        }
+        juce::MemoryBlock stateBlob = slot.stateData;
+        bool bypassed               = slot.isBypassed;
+        int  slotIdx                = slotIndex;
+
+        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
+        {
+            if (ok)
+            {
+                if (stateBlob.getSize() > 0)
+                    if (auto* proc = fxBus->getPlugin (slotIdx))
+                        proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
+                fxBus->setPluginBypassed (slotIdx, bypassed);
+            }
+            juce::MessageManager::callAsync ([this] {
+                fxBusPanel->refresh();
+                if (--pendingPluginLoads <= 0)
+                    loadingOverlay.dismiss();
+            });
+        });
+    }
+}
+
+void MainComponent::loadSongState (const ProjectData& data)
+{
+    // Mute channels during state restoration to avoid glitches
+    for (int c = 0; c < NUM_CHANNELS; ++c)
+        channels[c]->setOutputGain (0.0f);
+    sceneMuteActive = true;
+
+    // Restore channel states (faders, bypass, plugin parameters) — no plugin reload
+    for (int c = 0; c < NUM_CHANNELS; ++c)
+        channels[c]->setState (data.channels[c]);
+
+    // Restore input channel state
+    inputChannel->setState (data.inputChannelState);
+    inputDirectLevel.store (data.inputDirectMix, std::memory_order_relaxed);
+    inputDirectKnob.setValue (data.inputDirectMix, juce::dontSendNotification);
+
+    // Restore gate settings
+    noiseGate.enabled     = data.gateEnabled;
+    noiseGate.thresholdDb = data.gateThreshDb;
+    noiseGate.attackMs    = data.gateAttackMs;
+    noiseGate.holdMs      = data.gateHoldMs;
+    noiseGate.releaseMs   = data.gateReleaseMs;
+    gateToggle.setToggleState (data.gateEnabled, juce::dontSendNotification);
+    gateThreshSlider.setValue (data.gateThreshDb, juce::dontSendNotification);
+    inputTrimSlider.setValue (data.inputTrimDb, juce::dontSendNotification);
+
+    // Restore master FX bus state
+    FxBus::State fbs;
+    fbs.bypassed = data.fxBusState.bypassed;
+    fbs.plugins  = data.fxBusState.plugins;
+    fxBus->setState (fbs);
+    fxBusPanel->syncFromBus();
+
+    // Sync UI
+    for (int c = 0; c < NUM_CHANNELS; ++c)
+    {
+        float outDb = juce::Decibels::gainToDecibels (channels[c]->getOutputGain());
+        float inDb  = juce::Decibels::gainToDecibels (channels[c]->getInputGain());
+        outputFaders[c].setValue (outDb, juce::dontSendNotification);
+        outputGainKnobs[c].setValue (channels[c]->getPan(), juce::dontSendNotification);
+        inputTrimKnobs[c].setValue (inDb, juce::dontSendNotification);
+        updateFaderLabel (c);
+        channelStripPanels[c]->refresh();
+    }
+    inputChannelPanel->refresh();
+
+    // Unmute after plugin states have settled
+    juce::Timer::callAfterDelay (100, [this]
+    {
+        if (! sceneMuteActive) return;
+        for (int c = 0; c < NUM_CHANNELS; ++c)
+        {
+            float db = (float) outputFaders[c].getValue();
+            channels[c]->setOutputGain (juce::Decibels::decibelsToGain (db));
+        }
+        sceneMuteActive = false;
+    });
+
+    midiLearnManager.setParameterTarget ("loopVolume", (float) loopVolumeSlider.getValue());
+    midiLearnManager.setParameterTarget ("gateThresh", noiseGate.thresholdDb);
+    midiLearnManager.setParameterTarget ("inputTrim", data.inputTrimDb);
+
+    projectDirty = false;
+    updateActiveIndicators();
+    updateSceneButtonStates();
+    updateStatusBar();
 }
 
 ProjectData MainComponent::collectProjectData() const
@@ -2950,6 +3503,7 @@ ProjectData MainComponent::collectProjectData() const
     FxBus::State fbs = fxBus->getState();
     data.fxBusState.bypassed = fbs.bypassed;
     data.fxBusState.plugins  = fbs.plugins;
+    data.fxBusState.pluginAppearances = fxBusPanel->getAppearances();
 
     // Knob colors
     data.knobColorMap = knobColorMap;
@@ -3015,7 +3569,7 @@ void MainComponent::openRecentProject (int index)
     if (file.existsAsFile())
     {
         ProjectData data;
-        if (projectState.loadFromFile (file, data))
+        if (projectState.loadFromFile (file, data, &sceneManager, &midiLearnManager))
         {
             currentProjectFile = file;
             loadProjectData (data);
@@ -3456,7 +4010,15 @@ void MainComponent::showSetlistPanel()
         {
             ProjectData data;
             if (setlistManager.loadSongAtIndex (idx, data))
+            {
                 loadProjectData (data);
+                if (auto* song = setlistManager.getSong (idx))
+                {
+                    if (song->preferredSceneIndex >= 0)
+                        applySceneWithMute (song->preferredSceneIndex);
+                }
+            }
+            if (songBar) songBar->refresh();
         };
 
         if (projectDirty)
@@ -3483,6 +4045,8 @@ void MainComponent::showSetlistPanel()
         }
     };
 
+    panel->onSaveSongRequested = [this] { saveSongState(); };
+
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned (panel);
     opts.dialogTitle            = "Setlist";
@@ -3492,8 +4056,167 @@ void MainComponent::showSetlistPanel()
     opts.launchAsync();
 }
 
+void MainComponent::saveSongState()
+{
+    auto songsDir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("UpStage").getChildFile ("Songs");
+    songsDir.createDirectory();
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Save as Song", songsDir, "*.upstage");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode |
+                          juce::FileBrowserComponent::canSelectFiles,
+        [this, chooser] (const juce::FileChooser& fc)
+        {
+            auto result = fc.getResult();
+            if (result == juce::File{}) return;
+
+            auto file = result.withFileExtension ("upstage");
+            auto data = collectProjectData();
+            if (projectState.saveToFile (file, data, &sceneManager, &midiLearnManager))
+            {
+                SetlistManager::Song song;
+                song.name               = file.getFileNameWithoutExtension();
+                song.filePath           = file;
+                song.preferredSceneIndex = activeSceneIndex >= 0 ? activeSceneIndex : 0;
+                setlistManager.addSong (song);
+            }
+        });
+}
+
 //==============================================================================
-// Removed - replaced by updateActiveIndicators()
+void MainComponent::applySceneWithMute (int sceneIndex)
+{
+    ChannelStrip* ptrs[NUM_CHANNELS];
+    for (int c = 0; c < NUM_CHANNELS; ++c) ptrs[c] = channels[c].get();
+
+    auto result = sceneManager.applyScene (sceneIndex, ptrs);
+    if (! result.success)
+        return;
+
+    // Mute channels AFTER setState restored them (setState overwrites output gain)
+    // Store the scene's target gains, then zero the actual output for glitch prevention
+    float targetGain[NUM_CHANNELS];
+    for (int c = 0; c < NUM_CHANNELS; ++c)
+    {
+        targetGain[c] = channels[c]->getOutputGain();
+        channels[c]->setOutputGain (0.0f);
+    }
+    sceneMuteActive = true;
+
+    activeSceneIndex = sceneIndex;
+
+    noiseGate.enabled     = result.globals.gateEnabled;
+    noiseGate.thresholdDb = result.globals.gateThreshDb;
+    noiseGate.attackMs    = result.globals.gateAttackMs;
+    noiseGate.holdMs      = result.globals.gateHoldMs;
+    noiseGate.releaseMs   = result.globals.gateReleaseMs;
+    gateToggle.setToggleState (result.globals.gateEnabled, juce::dontSendNotification);
+    gateThreshSlider.setValue (result.globals.gateThreshDb, juce::dontSendNotification);
+    inputTrimSlider.setValue (result.globals.inputTrimDb, juce::dontSendNotification);
+
+    // Restore FX bus state (bus bypass + per-plugin bypass + plugin parameters)
+    FxBus::State fbs;
+    fbs.bypassed = result.globals.fxBusState.bypassed;
+    fbs.plugins  = result.globals.fxBusState.plugins;
+    fxBus->setState (fbs);
+    fxBusPanel->syncFromBus();
+
+    // Restore input channel state
+    inputChannel->setState (result.globals.inputChannelState);
+    inputDirectLevel.store (result.globals.inputDirectMix, std::memory_order_relaxed);
+    inputDirectKnob.setValue (result.globals.inputDirectMix, juce::dontSendNotification);
+    inputChannelPanel->refresh();
+
+    // Unmute after a short delay to let plugin state settle
+    juce::Timer::callAfterDelay (100, [this, targetGain]
+    {
+        if (! sceneMuteActive) return;
+        for (int c = 0; c < NUM_CHANNELS; ++c)
+            channels[c]->setOutputGain (targetGain[c]);
+        sceneMuteActive = false;
+    });
+
+    for (int c = 0; c < NUM_CHANNELS; ++c)
+    {
+        float outDb = juce::Decibels::gainToDecibels (targetGain[c]);
+        float inDb  = juce::Decibels::gainToDecibels (channels[c]->getInputGain());
+        outputFaders[c].setValue (outDb, juce::dontSendNotification);
+        outputGainKnobs[c].setValue (channels[c]->getPan(), juce::dontSendNotification);
+        inputTrimKnobs[c].setValue (inDb, juce::dontSendNotification);
+        updateFaderLabel (c);
+        channelStripPanels[c]->refresh();
+    }
+
+    midiLearnManager.setParameterTarget ("loopVolume",
+        (float) loopVolumeSlider.getValue());
+    midiLearnManager.setParameterTarget ("gateThresh",
+        noiseGate.thresholdDb);
+    midiLearnManager.setParameterTarget ("inputTrim",
+        (float) inputTrimSlider.getValue());
+    updateSceneButtonStates();
+}
+
+void MainComponent::captureSceneFromCurrent (int sceneIndex)
+{
+    ChannelStrip* ptrs[NUM_CHANNELS];
+    for (int c = 0; c < NUM_CHANNELS; ++c) ptrs[c] = channels[c].get();
+    SceneManager::GlobalState gs;
+    gs.gateEnabled  = noiseGate.enabled;
+    gs.gateThreshDb = noiseGate.thresholdDb;
+    gs.gateAttackMs  = noiseGate.attackMs;
+    gs.gateHoldMs    = noiseGate.holdMs;
+    gs.gateReleaseMs = noiseGate.releaseMs;
+    gs.inputTrimDb  = (float) inputTrimSlider.getValue();
+    auto fbs = fxBus->getState();
+    gs.fxBusState.bypassed = fbs.bypassed;
+    gs.fxBusState.plugins  = fbs.plugins;
+    gs.inputChannelState = inputChannel->getState();
+    gs.inputDirectMix    = inputDirectLevel.load();
+    sceneManager.captureScene (sceneIndex, ptrs, gs);
+    updateSceneButtonStates();
+    projectDirty = true;
+}
+
+void MainComponent::flashSceneButton (int sceneIndex)
+{
+    if (! juce::isPositiveAndBelow (sceneIndex, NUM_SCENES)) return;
+    sceneButtons[sceneIndex].setColour (juce::TextButton::buttonColourId,
+        juce::Colour (0xff00dd00));
+    sceneButtons[sceneIndex].setColour (juce::TextButton::textColourOffId,
+        juce::Colours::white);
+    sceneFlashIndex = sceneIndex;
+    sceneFlashCounter = 8;  // ~500ms at 60Hz timer
+}
+
+//==============================================================================
+void MainComponent::showChannelRenameDialog (int channelIndex)
+{
+    if (! juce::isPositiveAndBelow (channelIndex, NUM_CHANNELS)) return;
+
+    auto current = channelLabels[channelIndex].getText();
+    auto* aw = new juce::AlertWindow ("Rename Channel",
+                                       "Enter a name for channel " + juce::String (channelIndex + 1) + ":",
+                                       juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", current, "Name:");
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, channelIndex, aw] (int res)
+        {
+            if (res == 1)
+            {
+                auto newName = aw->getTextEditorContents ("name").trim();
+                if (newName.isNotEmpty())
+                {
+                    channelLabels[channelIndex].setText (newName, juce::sendNotification);
+                    channels[channelIndex]->setName (newName.toStdString());
+                    projectDirty = true;
+                }
+            }
+            delete aw;
+        }), true);
+}
 
 void MainComponent::updateSceneButtonStates()
 {
@@ -3518,6 +4241,45 @@ void MainComponent::updateSceneButtonStates()
                                             : ("S" + juce::String (i + 1)));
     }
     repaint();
+}
+
+void MainComponent::showKnobReadout (juce::Component& nearComp, const juce::String& text)
+{
+    if (knobReadout == nullptr) return;
+    knobReadout->setText (text, juce::dontSendNotification);
+    auto b = getLocalArea (&nearComp, nearComp.getLocalBounds());
+    const int w = 56, h = 18;
+    knobReadout->setBounds (b.getCentreX() - w / 2,
+                            b.getY() - h - 2,   // just above the knob
+                            w, h);
+    knobReadout->setVisible (true);
+    knobReadout->toFront (false);
+}
+
+void MainComponent::hideKnobReadout()
+{
+    if (knobReadout != nullptr) knobReadout->setVisible (false);
+}
+
+juce::String MainComponent::paramIdForComponent (juce::Component* c) const
+{
+    auto it = learnableControls.find (c);
+    return it != learnableControls.end() ? it->second : juce::String();
+}
+
+void MainComponent::updateRoutingModeButton()
+{
+    // Parallel = all channels sum to master (teal); Single = only the active
+    // channel plays (amber). Explicit words beat the old >>/> glyphs.
+    routingModeButton.setButtonText (parallelRouting ? "PARALLEL" : "SINGLE");
+    routingModeButton.setColour (juce::TextButton::buttonColourId,
+        parallelRouting ? juce::Colour (0xff2a4a4a)    // teal
+                        : juce::Colour (0xff4a3a1a));   // amber
+    routingModeButton.setColour (juce::TextButton::textColourOffId,
+        parallelRouting ? juce::Colour (0xff88dddd) : juce::Colour (0xffddbb88));
+    routingModeButton.setTooltip (parallelRouting
+        ? "Routing: PARALLEL - all channels play and sum to master. Click for SINGLE."
+        : "Routing: SINGLE - only the active channel plays. Click for PARALLEL.");
 }
 
 void MainComponent::updateTransportUI()
@@ -3646,7 +4408,7 @@ void MainComponent::autosave()
     auto file = getAutosaveFile();
     file.getParentDirectory().createDirectory();
     auto data = collectProjectData();
-    projectState.saveToFile (file, data);
+    projectState.saveToFile (file, data, &sceneManager, &midiLearnManager);
 }
 
 void MainComponent::checkAutosaveRecovery()
@@ -3683,7 +4445,7 @@ void MainComponent::checkAutosaveRecovery()
                 if (result == 1)
                 {
                     ProjectData data;
-                    if (projectState.loadFromFile (autosaveFile, data))
+                    if (projectState.loadFromFile (autosaveFile, data, &sceneManager, &midiLearnManager))
                         loadProjectData (data);
                 }
                 autosaveFile.deleteFile();
@@ -3714,24 +4476,15 @@ void MainComponent::updateActiveIndicators()
         bool isActive = (i == activeChannel);
         bool isMuted  = channelMuted[i];
 
+        // Text colour only — the LCD backing (background) is drawn in paint()
+        // so it can render recessed scanlines. Outline stays transparent.
+        channelLabels[i].setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
         if (isMuted)
-        {
-            channelLabels[i].setColour (juce::Label::backgroundColourId, juce::Colour (0xff3a1a1a));
-            channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffaa4444));
-            channelLabels[i].setColour (juce::Label::outlineColourId, juce::Colour (0xff2a1010));
-        }
+            channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffcc6666));
         else if (isActive)
-        {
-            channelLabels[i].setColour (juce::Label::backgroundColourId, juce::Colour (0xff2d5030));
-            channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffbbffbb));
-            channelLabels[i].setColour (juce::Label::outlineColourId, juce::Colour (0xff3a7040));
-        }
+            channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffcaffca));
         else
-        {
-            channelLabels[i].setColour (juce::Label::backgroundColourId, juce::Colour (0xff222222));
-            channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xff888888));
-            channelLabels[i].setColour (juce::Label::outlineColourId, juce::Colour (0xff1a1a1a));
-        }
+            channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xff99bbaa));
     }
     repaint();
 }

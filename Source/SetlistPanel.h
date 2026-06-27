@@ -8,12 +8,13 @@
  * UI panel showing the song list for the current setlist.
  * Displayed in a side panel or popup window.
  *
- * Lets the user:
- *   - Add songs (browse for .upstage files)
- *   - Remove songs
- *   - Reorder songs (drag-to-move buttons)
- *   - See which song is currently loaded (highlighted)
- *   - Advance / go back manually
+ * Features:
+ *   - Add/remove/reorder songs
+ *   - Current song highlighted in green, queued song in amber
+ *   - "Next up" label shows the upcoming song
+ *   - Advance/previous buttons + queue support
+ *   - Save current state as a new song
+ *   - Save/load .setlist files
  *
  * Wire onSongSelected to load the selected project in MainComponent.
  */
@@ -25,9 +26,10 @@ public:
     explicit SetlistPanel (SetlistManager& manager);
     ~SetlistPanel() override;
 
-    void refresh(); // call when setlist contents change
+    void refresh();
 
-    std::function<void(int index)> onSongSelected;
+    std::function<void(int index)>  onSongSelected;
+    std::function<void()>           onSaveSongRequested;
 
     // Component
     void paint   (juce::Graphics& g) override;
@@ -47,14 +49,17 @@ private:
     SetlistManager& manager;
 
     juce::ListBox    listBox;
-    juce::TextButton addButton    { "+ Add Song" };
-    juce::TextButton removeButton { "Remove" };
-    juce::TextButton upButton     { "\xE2\x96\xB2" };
-    juce::TextButton downButton   { "\xE2\x96\xBC" };
-    juce::TextButton prevButton   { "\xE2\x97\x80 Prev" };
-    juce::TextButton nextButton   { "Next \xE2\x96\xB6" };
+    juce::TextButton addButton       { "+ Add Song" };
+    juce::TextButton removeButton    { "Remove" };
+    juce::TextButton upButton        { "Up" };
+    juce::TextButton downButton      { "Dn" };
+    juce::TextButton prevButton      { "<< Prev" };
+    juce::TextButton nextButton      { "Next >>" };
+    juce::TextButton queueButton     { "Queue" };
+    juce::TextButton saveSongButton  { "Save as Song" };
     juce::TextButton saveSetlistButton { "Save Setlist" };
     juce::TextButton loadSetlistButton { "Load Setlist" };
+    juce::Label      nextUpLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SetlistPanel)
 };

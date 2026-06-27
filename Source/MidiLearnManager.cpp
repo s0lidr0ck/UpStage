@@ -184,9 +184,31 @@ void MidiLearnManager::clearAll()
     bindings.clear();
 }
 
+int MidiLearnManager::getCcForParam (const juce::String& paramID) const
+{
+    juce::ScopedLock sl (lock);
+    for (const auto& b : bindings)
+        if (b.paramID == paramID)
+            return b.ccNumber;
+    return -1;
+}
+
+int MidiLearnManager::getChannelForParam (const juce::String& paramID) const
+{
+    juce::ScopedLock sl (lock);
+    for (const auto& b : bindings)
+        if (b.paramID == paramID)
+            return b.midiChannel;
+    return -1;
+}
+
 //==============================================================================
 void MidiLearnManager::saveToXml (juce::XmlElement& parent) const
 {
+    // processMessage() mutates bindings from the audio thread under this lock;
+    // guard the read so a CC arriving mid-save can't invalidate the iterator.
+    juce::ScopedLock sl (lock);
+
     auto* el = parent.createNewChildElement ("MidiLearn");
 
     // Persist the feature flag so the user's preference survives project reload.
@@ -208,6 +230,10 @@ void MidiLearnManager::saveToXml (juce::XmlElement& parent) const
 
 void MidiLearnManager::loadFromXml (const juce::XmlElement& parent)
 {
+    // Guard against a CC arriving on the audio thread (processMessage) while we
+    // clear and rebuild bindings during a project load.
+    juce::ScopedLock sl (lock);
+
     bindings.clear();
     auto* el = parent.getChildByName ("MidiLearn");
     if (el == nullptr) return;

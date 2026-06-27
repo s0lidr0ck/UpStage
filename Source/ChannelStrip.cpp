@@ -8,10 +8,31 @@ ChannelStrip::ChannelStrip (int index, juce::AudioPluginFormatManager& fm)
 
 ChannelStrip::~ChannelStrip()
 {
-    juce::ScopedLock sl (chainLock);
-    for (auto* e : pluginChain)
-        delete e;
-    pluginChain.clear();
+    // Detach the chain under the lock so the audio thread can no longer reach
+    // any entry, then dispose each one (close editor window, delete plugin)
+    // outside the lock — plugin/editor teardown can block and must never stall
+    // the audio thread.
+    juce::Array<PluginEntry*> doomed;
+    {
+        juce::ScopedLock sl (chainLock);
+        doomed.swapWith (pluginChain);
+    }
+    for (auto* e : doomed)
+        disposeEntry (e);
+}
+
+void ChannelStrip::disposeEntry (PluginEntry* entry)
+{
+    if (entry == nullptr)
+        return;
+
+    // Close (and delete) the editor window first so it can never reference a
+    // destroyed processor. The window self-deletes via closeButtonPressed, so
+    // only delete it here if it is still open.
+    if (entry->editorWindow != nullptr)
+        delete entry->editorWindow.getComponent();
+
+    delete entry;
 }
 
 //==============================================================================
@@ -92,12 +113,26 @@ bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
 
 void ChannelStrip::removePlugin (int chainIndex)
 {
-    juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (chainIndex, pluginChain.size()))
+    PluginEntry* entry = nullptr;
     {
-        auto* entry = pluginChain.removeAndReturn (chainIndex);
-        delete entry;
+        juce::ScopedLock sl (chainLock);
+        if (juce::isPositiveAndBelow (chainIndex, pluginChain.size()))
+            entry = pluginChain.removeAndReturn (chainIndex);
     }
+    // Dispose outside the lock: closing the editor and destroying the plugin
+    // can block, and must not stall the audio thread waiting on chainLock.
+    disposeEntry (entry);
+}
+
+void ChannelStrip::clearAllPlugins()
+{
+    juce::Array<PluginEntry*> doomed;
+    {
+        juce::ScopedLock sl (chainLock);
+        doomed.swapWith (pluginChain);
+    }
+    for (auto* e : doomed)
+        disposeEntry (e);
 }
 
 void ChannelStrip::movePlugin (int fromIndex, int toIndex)
@@ -108,53 +143,66 @@ void ChannelStrip::movePlugin (int fromIndex, int toIndex)
 
 void ChannelStrip::openPluginEditor (int chainIndex)
 {
-    juce::ScopedLock sl (chainLock);
-    if (! juce::isPositiveAndBelow (chainIndex, pluginChain.size())) return;
+    // Must run on the message thread — it touches the GUI and the per-entry
+    // editorWindow pointer, which only the message thread owns.
+    JUCE_ASSERT_MESSAGE_THREAD
 
-    auto* proc = pluginChain[chainIndex]->processor.get();
+    // Resolve the entry under the lock, but do NOT build the window while
+    // holding it (createEditor can be slow and would stall the audio thread).
+    PluginEntry* entry = nullptr;
+    {
+        juce::ScopedLock sl (chainLock);
+        if (! juce::isPositiveAndBelow (chainIndex, pluginChain.size())) return;
+        entry = pluginChain[chainIndex];
+    }
+
+    auto* proc = entry->processor.get();
     if (proc == nullptr || ! proc->hasEditor()) return;
 
-    // Schedule editor creation on the message thread; the window self-destructs
-    // on close so no external owner is needed.
-    juce::MessageManager::callAsync ([proc]()
+    // Already open — just bring it to the front.
+    if (entry->editorWindow != nullptr)
     {
-        // PluginEditorWindow — a DocumentWindow that deletes itself when closed.
-        // Defined locally so it is tightly scoped to the async callback.
-        struct PluginEditorWindow : public juce::DocumentWindow
+        entry->editorWindow->toFront (true);
+        return;
+    }
+
+    // PluginEditorWindow — a DocumentWindow that deletes itself when closed.
+    struct PluginEditorWindow : public juce::DocumentWindow
+    {
+        PluginEditorWindow (juce::AudioProcessor* p)
+            : juce::DocumentWindow (p->getName(),
+                                    juce::Colours::darkgrey,
+                                    juce::DocumentWindow::closeButton,
+                                    true /* addToDesktop */)
         {
-            PluginEditorWindow (juce::AudioProcessor* p)
-                : juce::DocumentWindow (p->getName(),
-                                        juce::Colours::darkgrey,
-                                        juce::DocumentWindow::closeButton,
-                                        true /* addToDesktop */)
+            if (auto* editor = p->createEditorIfNeeded())
             {
-                if (auto* editor = p->createEditorIfNeeded())
-                {
-                    setContentOwned (editor, true);
-                    setResizable (true, false);
-                    centreWithSize (editor->getWidth(), editor->getHeight());
-                }
-                else
-                {
-                    // Plugin has no visual editor — show a simple placeholder.
-                    auto* label = new juce::Label ("noEditor",
-                                                   "This plugin has no editor.");
-                    label->setSize (260, 60);
-                    label->setJustificationType (juce::Justification::centred);
-                    setContentOwned (label, true);
-                    centreWithSize (260, 60);
-                }
-                setVisible (true);
+                setContentOwned (editor, true);
+                setResizable (true, false);
+                centreWithSize (editor->getWidth(), editor->getHeight());
             }
+            else
+            {
+                // Plugin has no visual editor — show a simple placeholder.
+                auto* label = new juce::Label ("noEditor",
+                                               "This plugin has no editor.");
+                label->setSize (260, 60);
+                label->setJustificationType (juce::Justification::centred);
+                setContentOwned (label, true);
+                centreWithSize (260, 60);
+            }
+            setVisible (true);
+        }
 
-            // Called by JUCE when the user clicks the window's close button.
-            // Deleting 'this' is safe here because DocumentWindow handles
-            // the desktop-removal lifecycle correctly.
-            void closeButtonPressed() override { delete this; }
-        };
+        // Called by JUCE when the user clicks the window's close button.
+        // Deleting 'this' nulls the owning entry's SafePointer automatically.
+        void closeButtonPressed() override { delete this; }
+    };
 
-        new PluginEditorWindow (proc); // self-managing; no owner needed
-    });
+    // The entry's SafePointer tracks the window so it can be force-closed
+    // (and never outlive the plugin) when the plugin is removed or the
+    // project is switched.
+    entry->editorWindow = new PluginEditorWindow (proc);
 }
 
 void ChannelStrip::setPluginBypassed (int chainIndex, bool bypassed)
@@ -212,27 +260,35 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
     }
 
     {
-        juce::ScopedLock sl (chainLock);
-        for (auto* entry : pluginChain)
+        // Try-lock, never block: the message thread may be holding chainLock
+        // while doing slow plugin state I/O (get/setStateInformation) during a
+        // scene recall or project load. The audio thread must never wait on
+        // that — if the chain is busy, pass this block through the inserts
+        // untouched rather than freezing.
+        juce::ScopedTryLock sl (chainLock);
+        if (sl.isLocked())
         {
-            if (entry->processor == nullptr) continue;
-            if (entry->bypassed)             continue;
+            for (auto* entry : pluginChain)
+            {
+                if (entry->processor == nullptr) continue;
+                if (entry->bypassed)             continue;
 
-            juce::MidiBuffer pluginMidi (midi);
-            auto expected = entry->processor->getTotalNumInputChannels();
-            if (expected > buffer.getNumChannels())
-            {
-                juce::AudioBuffer<float> padded (expected, buffer.getNumSamples());
-                padded.clear();
-                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                    padded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
-                entry->processor->processBlock (padded, pluginMidi);
-                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                    buffer.copyFrom (ch, 0, padded, ch, 0, buffer.getNumSamples());
-            }
-            else
-            {
-                entry->processor->processBlock (buffer, pluginMidi);
+                juce::MidiBuffer pluginMidi (midi);
+                auto expected = entry->processor->getTotalNumInputChannels();
+                if (expected > buffer.getNumChannels())
+                {
+                    juce::AudioBuffer<float> padded (expected, buffer.getNumSamples());
+                    padded.clear();
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        padded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+                    entry->processor->processBlock (padded, pluginMidi);
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.copyFrom (ch, 0, padded, ch, 0, buffer.getNumSamples());
+                }
+                else
+                {
+                    entry->processor->processBlock (buffer, pluginMidi);
+                }
             }
         }
     }

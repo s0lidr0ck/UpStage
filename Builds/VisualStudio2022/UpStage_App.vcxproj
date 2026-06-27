@@ -156,6 +156,7 @@
     <ClCompile Include="..\..\Source\ProjectState.cpp"/>
     <ClCompile Include="..\..\Source\SetlistManager.cpp"/>
     <ClCompile Include="..\..\Source\SetlistPanel.cpp"/>
+    <ClCompile Include="..\..\Source\SongBar.cpp"/>
     <ClCompile Include="..\..\Source\SceneManager.cpp"/>
     <ClCompile Include="..\..\Source\TapTempo.cpp"/>
     <ClCompile Include="..\..\Source\Metronome.cpp"/>
@@ -2921,6 +2922,7 @@
     <ClInclude Include="..\..\Source\ProjectState.h"/>
     <ClInclude Include="..\..\Source\SetlistManager.h"/>
     <ClInclude Include="..\..\Source\SetlistPanel.h"/>
+    <ClInclude Include="..\..\Source\SongBar.h"/>
     <ClInclude Include="..\..\Source\SceneManager.h"/>
     <ClInclude Include="..\..\Source\TapTempo.h"/>
     <ClInclude Include="..\..\Source\Metronome.h"/>

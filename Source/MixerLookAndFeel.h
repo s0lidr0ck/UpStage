@@ -110,7 +110,13 @@ public:
             float thumbWidth = juce::jmin ((float)width * 0.6f, 42.0f);
             float thumbHeight = 72.0f;
             float thumbX = cx - thumbWidth * 0.5f;
-            float thumbY = sliderPos - thumbHeight * 0.5f;
+            // Clamp the thumb's centre line to the visible scale extremes (+10
+            // and -50) so it can't ride above/below the printed scale, even
+            // though the slider's value range extends further (-60..+12).
+            float topLimitY    = trackTop + trackH * (1.0f - (float) range.convertTo0to1 ( 10.0));
+            float bottomLimitY = trackTop + trackH * (1.0f - (float) range.convertTo0to1 (-50.0));
+            float thumbCentreY = juce::jlimit (topLimitY, bottomLimitY, sliderPos);
+            float thumbY = thumbCentreY - thumbHeight * 0.5f;
 
             juce::Colour faderCol = getFaderColour (slider);
 
@@ -280,6 +286,19 @@ public:
                 g.setColour (accentColour);
                 g.strokePath (arcFill, juce::PathStrokeType (3.0f));
             }
+
+            // Center-detent tick at 12 o'clock marks a bipolar (pan) control, so
+            // it reads as a pan knob even when centred (no arc drawn).
+            if (bipolar)
+            {
+                float midAngle = rotaryStartAngle + 0.5f * (rotaryEndAngle - rotaryStartAngle);
+                juce::Point<float> outer (centreX + (radius + 3.0f) * std::sin (midAngle),
+                                          centreY - (radius + 3.0f) * std::cos (midAngle));
+                juce::Point<float> inner (centreX + (radius - 1.0f) * std::sin (midAngle),
+                                          centreY - (radius - 1.0f) * std::cos (midAngle));
+                g.setColour (accentColour.brighter (0.3f));
+                g.drawLine ({ inner, outer }, 2.0f);
+            }
         }
 
         // ---- Knob body - metallic gradient tinted with accent colour ----
@@ -357,20 +376,36 @@ public:
             g.drawHorizontalLine ((int) cavity.getBottom() - 1, cavity.getX() + 2.0f, cavity.getRight() - 2.0f);
         }
 
-        // ---- Button face: raised cap sitting in the cavity ----
-        auto faceRect = isDown ? bounds.reduced (1.5f).translated (0.0f, 1.0f)
+        // ---- Button face: raised cap, or sunken when pressed/active ----
+        auto faceRect = isDown ? bounds.reduced (2.0f).translated (0.0f, 1.0f)
                                : bounds.reduced (1.5f);
 
-        // Multi-stop gradient for plastic/rubber surface
+        // Multi-stop gradient. When down, INVERT it (dark at top) so the face
+        // reads as recessed/pressed-in rather than raised.
         {
-            juce::ColourGradient face (
-                baseColour.brighter (0.35f), faceRect.getCentreX(), faceRect.getY(),
-                baseColour.darker (0.4f),    faceRect.getCentreX(), faceRect.getBottom(), false);
-            face.addColour (0.15, baseColour.brighter (0.15f));
-            face.addColour (0.5,  baseColour);
-            face.addColour (0.85, baseColour.darker (0.25f));
+            juce::ColourGradient face = isDown
+                ? juce::ColourGradient (baseColour.darker (0.45f), faceRect.getCentreX(), faceRect.getY(),
+                                        baseColour.brighter (0.12f), faceRect.getCentreX(), faceRect.getBottom(), false)
+                : juce::ColourGradient (baseColour.brighter (0.35f), faceRect.getCentreX(), faceRect.getY(),
+                                        baseColour.darker (0.4f),    faceRect.getCentreX(), faceRect.getBottom(), false);
+            if (! isDown)
+            {
+                face.addColour (0.15, baseColour.brighter (0.15f));
+                face.addColour (0.5,  baseColour);
+                face.addColour (0.85, baseColour.darker (0.25f));
+            }
             g.setGradientFill (face);
             g.fillRoundedRectangle (faceRect, r);
+
+            // Pressed: inner shadow along the top/left edges (sunken wall).
+            if (isDown)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.5f));
+                g.drawHorizontalLine ((int) faceRect.getY(), faceRect.getX() + 2.0f, faceRect.getRight() - 2.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.28f));
+                g.drawHorizontalLine ((int) faceRect.getY() + 1, faceRect.getX() + 2.0f, faceRect.getRight() - 2.0f);
+                g.drawVerticalLine ((int) faceRect.getX(), faceRect.getY() + 2.0f, faceRect.getBottom() - 2.0f);
+            }
         }
 
         // ---- Surface texture: fine horizontal grain ----
@@ -438,16 +473,40 @@ public:
                          bool /*highlighted*/, bool /*down*/) override
     {
         auto id = button.getComponentID();
-        if (id.startsWith ("icon_") && ! showButtonLabels)
+
+        // Scene buttons render as dot-matrix displays like the strip nameplates.
+        if (id == "scene_btn")
         {
-            auto textColour = button.findColour (button.getToggleState()
+            auto col = button.findColour (button.getToggleState()
                 ? juce::TextButton::textColourOnId
                 : juce::TextButton::textColourOffId);
-            g.setColour (textColour);
+            drawDotMatrixInto (g, button.getLocalBounds().toFloat(), button.getButtonText().toUpperCase(), col);
+            return;
+        }
+
+        if (id.startsWith ("icon_") && ! showButtonLabels)
+        {
+            const bool lit = button.getToggleState();
+            auto textColour = button.findColour (lit
+                ? juce::TextButton::textColourOnId
+                : juce::TextButton::textColourOffId);
 
             auto area = button.getLocalBounds().toFloat().reduced (3.0f);
             float cx = area.getCentreX(), cy = area.getCentreY();
             float sz = juce::jmin (area.getWidth(), area.getHeight()) * 0.35f;
+
+            // Backlit legend: when active, a glow blooms behind the etched icon
+            // so it reads like an illuminated console switch.
+            if (lit)
+            {
+                float gr = sz * 2.4f;
+                juce::ColourGradient glow (textColour.withAlpha (0.45f), cx, cy,
+                                           textColour.withAlpha (0.0f), cx + gr, cy + gr, true);
+                g.setGradientFill (glow);
+                g.fillEllipse (cx - gr, cy - gr, gr * 2.0f, gr * 2.0f);
+                textColour = textColour.brighter (0.5f);  // brighter filament when lit
+            }
+            g.setColour (textColour);
 
             if (id == "icon_tuner")
             {
@@ -554,6 +613,13 @@ public:
     //==========================================================================
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {
+        // ---- Dot-matrix LCD rendering for channel-strip nameplates ----
+        if (label.getComponentID() == "strip_label")
+        {
+            drawDotMatrixLabel (g, label);
+            return;
+        }
+
         auto bounds = label.getLocalBounds().toFloat();
         auto bgColour = label.findColour (juce::Label::backgroundColourId);
 
@@ -600,6 +666,185 @@ public:
     }
 
     //==========================================================================
+    // 5x7 dot-matrix font. Each glyph is 5 column-bytes; bit r (0=top) of a
+    // column byte lights the dot at that row. Covers A-Z, 0-9, space, and a few
+    // symbols; unknown chars fall back to a blank/box.
+    static const uint8_t* dotFont5x7 (juce::juce_wchar ch)
+    {
+        // columns are listed left-to-right; each byte's low 7 bits are rows top->bottom
+        static const uint8_t blank[5]   = { 0,0,0,0,0 };
+        static const uint8_t box[5]     = { 0x7F,0x41,0x41,0x41,0x7F };
+        switch (ch)
+        {
+            case ' ': { static const uint8_t g[5]={0,0,0,0,0}; return g; }
+            case 'A': { static const uint8_t g[5]={0x7E,0x09,0x09,0x09,0x7E}; return g; }
+            case 'B': { static const uint8_t g[5]={0x7F,0x49,0x49,0x49,0x36}; return g; }
+            case 'C': { static const uint8_t g[5]={0x3E,0x41,0x41,0x41,0x22}; return g; }
+            case 'D': { static const uint8_t g[5]={0x7F,0x41,0x41,0x22,0x1C}; return g; }
+            case 'E': { static const uint8_t g[5]={0x7F,0x49,0x49,0x49,0x41}; return g; }
+            case 'F': { static const uint8_t g[5]={0x7F,0x09,0x09,0x09,0x01}; return g; }
+            case 'G': { static const uint8_t g[5]={0x3E,0x41,0x49,0x49,0x7A}; return g; }
+            case 'H': { static const uint8_t g[5]={0x7F,0x08,0x08,0x08,0x7F}; return g; }
+            case 'I': { static const uint8_t g[5]={0x00,0x41,0x7F,0x41,0x00}; return g; }
+            case 'J': { static const uint8_t g[5]={0x20,0x40,0x41,0x3F,0x01}; return g; }
+            case 'K': { static const uint8_t g[5]={0x7F,0x08,0x14,0x22,0x41}; return g; }
+            case 'L': { static const uint8_t g[5]={0x7F,0x40,0x40,0x40,0x40}; return g; }
+            case 'M': { static const uint8_t g[5]={0x7F,0x02,0x0C,0x02,0x7F}; return g; }
+            case 'N': { static const uint8_t g[5]={0x7F,0x04,0x08,0x10,0x7F}; return g; }
+            case 'O': { static const uint8_t g[5]={0x3E,0x41,0x41,0x41,0x3E}; return g; }
+            case 'P': { static const uint8_t g[5]={0x7F,0x09,0x09,0x09,0x06}; return g; }
+            case 'Q': { static const uint8_t g[5]={0x3E,0x41,0x51,0x21,0x5E}; return g; }
+            case 'R': { static const uint8_t g[5]={0x7F,0x09,0x19,0x29,0x46}; return g; }
+            case 'S': { static const uint8_t g[5]={0x46,0x49,0x49,0x49,0x31}; return g; }
+            case 'T': { static const uint8_t g[5]={0x01,0x01,0x7F,0x01,0x01}; return g; }
+            case 'U': { static const uint8_t g[5]={0x3F,0x40,0x40,0x40,0x3F}; return g; }
+            case 'V': { static const uint8_t g[5]={0x1F,0x20,0x40,0x20,0x1F}; return g; }
+            case 'W': { static const uint8_t g[5]={0x7F,0x20,0x18,0x20,0x7F}; return g; }
+            case 'X': { static const uint8_t g[5]={0x63,0x14,0x08,0x14,0x63}; return g; }
+            case 'Y': { static const uint8_t g[5]={0x03,0x04,0x78,0x04,0x03}; return g; }
+            case 'Z': { static const uint8_t g[5]={0x61,0x51,0x49,0x45,0x43}; return g; }
+            case '0': { static const uint8_t g[5]={0x3E,0x51,0x49,0x45,0x3E}; return g; }
+            case '1': { static const uint8_t g[5]={0x00,0x42,0x7F,0x40,0x00}; return g; }
+            case '2': { static const uint8_t g[5]={0x42,0x61,0x51,0x49,0x46}; return g; }
+            case '3': { static const uint8_t g[5]={0x21,0x41,0x45,0x4B,0x31}; return g; }
+            case '4': { static const uint8_t g[5]={0x18,0x14,0x12,0x7F,0x10}; return g; }
+            case '5': { static const uint8_t g[5]={0x27,0x45,0x45,0x45,0x39}; return g; }
+            case '6': { static const uint8_t g[5]={0x3C,0x4A,0x49,0x49,0x30}; return g; }
+            case '7': { static const uint8_t g[5]={0x01,0x71,0x09,0x05,0x03}; return g; }
+            case '8': { static const uint8_t g[5]={0x36,0x49,0x49,0x49,0x36}; return g; }
+            case '9': { static const uint8_t g[5]={0x06,0x49,0x49,0x29,0x1E}; return g; }
+            case '-': { static const uint8_t g[5]={0x08,0x08,0x08,0x08,0x08}; return g; }
+            case '.': { static const uint8_t g[5]={0x00,0x00,0x40,0x00,0x00}; return g; }
+            case '#': { static const uint8_t g[5]={0x14,0x7F,0x14,0x7F,0x14}; return g; }
+            case '/': { static const uint8_t g[5]={0x20,0x10,0x08,0x04,0x02}; return g; }
+            case ':': { static const uint8_t g[5]={0x00,0x36,0x36,0x00,0x00}; return g; }
+            default:  return (ch > 32 ? box : blank);
+        }
+    }
+
+    //==========================================================================
+    // Renders the label as an old dot-matrix LCD seen through cheap glossy
+    // plastic: lit dots form the glyphs over a grid of dim unlit dots, on a
+    // dark green-black screen, with a diagonal gloss sheen on top.
+    void drawDotMatrixLabel (juce::Graphics& g, juce::Label& label)
+    {
+        const auto text = label.getText().toUpperCase();
+        // Lit-dot colour comes from the label's text colour (carries active/mute
+        // state), but the MASTER display gets its own purple to match the knob.
+        juce::Colour litColour = label.findColour (juce::Label::textColourId);
+        if (text == "MASTER")
+            litColour = juce::Colour (0xffaa55cc);
+        drawDotMatrixInto (g, label.getLocalBounds().toFloat(), text, litColour.brighter (0.25f));
+    }
+
+    // Reusable dot-matrix LCD renderer: recessed screen + 5x7 lit dots + gloss.
+    void drawDotMatrixInto (juce::Graphics& g, juce::Rectangle<float> full,
+                            const juce::String& text, juce::Colour litColour)
+    {
+        // ---- Recess the screen INTO the panel ----
+        // The whole display is pushed back behind the faceplate: a dark inner
+        // shadow rims the top/left (light from above), a faint lip catches the
+        // bottom/right, and the LCD substrate sits a couple px inside.
+        auto bounds = full.reduced (2.5f);   // the screen sits inset from the cutout
+
+        // Cutout shadow (dark frame around the recessed screen).
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillRoundedRectangle (full, 3.5f);
+        // Top/left inner shadow — the wall of the recess.
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.drawLine (full.getX() + 1.5f, full.getY() + 1.0f, full.getRight() - 1.5f, full.getY() + 1.0f, 1.5f);
+        g.drawLine (full.getX() + 1.0f, full.getY() + 1.5f, full.getX() + 1.0f, full.getBottom() - 1.5f, 1.5f);
+        // Bottom/right lip highlight — the near edge catching light.
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.drawLine (full.getX() + 1.5f, full.getBottom() - 0.5f, full.getRight() - 1.5f, full.getBottom() - 0.5f, 1.0f);
+        g.drawLine (full.getRight() - 0.5f, full.getY() + 1.5f, full.getRight() - 0.5f, full.getBottom() - 1.5f, 1.0f);
+
+        // ---- LCD substrate inside the recess ----
+        g.setColour (juce::Colours::black);
+        g.fillRoundedRectangle (bounds, 2.5f);
+        juce::ColourGradient screen (juce::Colour (0xff1a2018), bounds.getCentreX(), bounds.getY(),
+                                     juce::Colour (0xff121710), bounds.getCentreX(), bounds.getBottom(), false);
+        g.setGradientFill (screen);
+        g.fillRoundedRectangle (bounds.reduced (1.0f), 2.0f);
+
+        // ---- Fixed 5x7 dot-matrix font (like a real LCD character ROM) ----
+        // Each glyph = 5 columns; lit dots traced from an explicit bitmap so the
+        // text is always crisp and readable, never sampled mush.
+        const int gw = 5, gh = 7;            // glyph cell: 5 wide x 7 tall
+        const int charGap = 1;               // blank columns between chars
+        const int n = text.length();
+        if (n == 0) return;
+
+        const int totalCols = n * gw + (n - 1) * charGap;
+        auto area = bounds.reduced (5.0f, 2.5f);
+        // Largest dot pitch that fits, capped so the matrix has breathing room
+        // inside the recessed screen rather than filling it.
+        float pitch = juce::jmin (area.getWidth() / (float) totalCols,
+                                  area.getHeight() / (float) gh);
+        pitch = juce::jmin (pitch, 3.0f);
+        float dotRadius = juce::jmax (0.65f, pitch * 0.40f);
+
+        float gridW = totalCols * pitch;
+        float gridH = gh * pitch;
+        float ox = area.getCentreX() - gridW * 0.5f + pitch * 0.5f;
+        float oy = area.getCentreY() - gridH * 0.5f + pitch * 0.5f;
+
+        // Unlit dots faintly tinted toward the lit colour, as on a real backlit LCD.
+        const juce::Colour unlit = litColour.withAlpha (0.16f);
+        for (int ci = 0; ci < n; ++ci)
+        {
+            const uint8_t* glyph = dotFont5x7 (text[ci]);
+            int charCol0 = ci * (gw + charGap);
+            for (int col = 0; col < gw; ++col)
+            {
+                uint8_t bits = glyph[col];
+                for (int row = 0; row < gh; ++row)
+                {
+                    float cx = ox + (charCol0 + col) * pitch;
+                    float cy = oy + row * pitch;
+                    bool on = (bits >> row) & 1;
+                    if (on)
+                    {
+                        // Soft glow halo, then the bright dot core.
+                        g.setColour (litColour.withAlpha (0.30f));
+                        g.fillEllipse (cx - dotRadius * 1.6f, cy - dotRadius * 1.6f,
+                                       dotRadius * 3.2f, dotRadius * 3.2f);
+                        g.setColour (litColour);
+                        g.fillEllipse (cx - dotRadius, cy - dotRadius, dotRadius * 2.0f, dotRadius * 2.0f);
+                    }
+                    else
+                    {
+                        g.setColour (unlit);
+                        g.fillEllipse (cx - dotRadius * 0.7f, cy - dotRadius * 0.7f,
+                                       dotRadius * 1.4f, dotRadius * 1.4f);
+                    }
+                }
+            }
+        }
+
+        // ---- Cheap-plastic gloss: bright diagonal sheen across the top-left ----
+        {
+            juce::Path gloss;
+            gloss.addRoundedRectangle (bounds.reduced (1.5f), 2.5f);
+            g.saveState();
+            g.reduceClipRegion (gloss);
+            juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.16f), bounds.getX(), bounds.getY(),
+                                        juce::Colours::transparentWhite, bounds.getX() + bounds.getWidth() * 0.6f,
+                                        bounds.getY() + bounds.getHeight() * 0.9f, false);
+            g.setGradientFill (sheen);
+            g.fillRect (bounds);
+            // A faint hard reflection streak near the top.
+            g.setColour (juce::Colours::white.withAlpha (0.10f));
+            g.fillRect (bounds.getX() + 2.0f, bounds.getY() + 1.5f, bounds.getWidth() - 4.0f, 1.5f);
+            g.restoreState();
+        }
+
+        // ---- Inner bezel rim around the recessed screen ----
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.drawRoundedRectangle (bounds, 2.5f, 0.8f);
+    }
+
+    //==========================================================================
     void setKnobColorMap (const std::map<juce::String, juce::String>* map)
     {
         knobColorMapPtr = map;
@@ -643,6 +888,11 @@ private:
             if (it != knobColorMapPtr->end())
                 return colourForName (it->second);
         }
+
+        // Pan knobs get a distinct amber accent so they read differently from
+        // the blue IN-trim knobs at a glance (they share the "ch" name prefix).
+        if (compID.contains ("pan") || slider.getName().contains ("pan"))
+            return juce::Colour (0xffe2a04a); // amber
 
         // Default by name
         auto name = slider.getName();

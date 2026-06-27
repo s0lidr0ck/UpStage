@@ -28,8 +28,13 @@ public:
     {
         bool  gateEnabled   = false;
         float gateThreshDb  = -60.0f;
+        float gateAttackMs  = 5.0f;
+        float gateHoldMs    = 50.0f;
+        float gateReleaseMs = 100.0f;
         float inputTrimDb   = 0.0f;
         ProjectData::FxBusState fxBusState;
+        ChannelState inputChannelState;
+        float inputDirectMix = 0.0f;
     };
 
     //==========================================================================

@@ -1,4 +1,7 @@
 # Build outputs
+Builds/VisualStudio2022/x64/
+Builds/VisualStudio2022/*.vcxproj.user
+Builds/VisualStudio2022/.vs/
 Builds/VisualStudio2025/x64/
 Builds/VisualStudio2025/*.vcxproj.user
 Builds/VisualStudio2025/.vs/

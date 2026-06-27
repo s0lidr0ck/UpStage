@@ -130,6 +130,11 @@ public:
     void  clearBinding  (const juce::String& paramID);
     void  clearAll();
 
+    /** CC number bound to paramID, or -1 if not bound. Thread-safe. */
+    int getCcForParam (const juce::String& paramID) const;
+    /** MIDI channel bound to paramID (0 = any), or -1 if not bound. Thread-safe. */
+    int getChannelForParam (const juce::String& paramID) const;
+
     //==========================================================================
     // Serialization
     void saveToXml   (juce::XmlElement& parent) const;
@@ -151,7 +156,7 @@ private:
     juce::Array<Binding>         bindings;
     juce::String                 learningParamID;
     juce::ListenerList<Listener> listeners;
-    juce::CriticalSection        lock;
+    mutable juce::CriticalSection lock;
 
     /** Convert a normalised value (0–1 within the binding's own range) to CC. */
     static int valueToCc (float value, float minValue, float maxValue) noexcept;

@@ -29,11 +29,13 @@ public:
     bool addPlugin   (const juce::PluginDescription& desc,
                       std::function<void(bool success)> callback);
     void removePlugin (int index);
+    void clearAllPlugins();
     void openPluginEditor (int index);
     void setPluginBypassed (int index, bool bypassed);
     bool isPluginBypassed  (int index) const;
     int  getNumPlugins() const;
     juce::AudioProcessor* getPlugin (int index) const;
+    juce::String getPluginIdentifier (int index) const;
 
     //==========================================================================
     void setBypassed (bool b);
@@ -62,12 +64,23 @@ private:
         std::unique_ptr<juce::AudioPluginInstance> processor;
         juce::String identifier;
         bool         bypassed = false;
+
+        // Editor window for this plugin, if open. Non-owning safe pointer: the
+        // window self-deletes when closed (auto-nulling this), but we also
+        // force it closed before the processor is destroyed so the editor can
+        // never outlive the plugin. Message thread only.
+        juce::Component::SafePointer<juce::DocumentWindow> editorWindow;
     };
 
     juce::AudioPluginFormatManager& formatManager;
 
     juce::Array<PluginEntry*> pluginChain;
     mutable juce::CriticalSection chainLock;
+
+    /** Close any open editor window, then delete the entry (and its plugin).
+        Call on the message thread with the entry already removed from
+        pluginChain. */
+    static void disposeEntry (PluginEntry* entry);
 
     std::atomic<bool> bypassed { false };
     juce::AudioPlayHead* playHead = nullptr;
