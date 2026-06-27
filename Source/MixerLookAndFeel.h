@@ -573,6 +573,13 @@ public:
     //==========================================================================
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {
+        // ---- Dot-matrix LCD rendering for channel-strip nameplates ----
+        if (label.getComponentID() == "strip_label")
+        {
+            drawDotMatrixLabel (g, label);
+            return;
+        }
+
         auto bounds = label.getLocalBounds().toFloat();
         auto bgColour = label.findColour (juce::Label::backgroundColourId);
 
@@ -619,6 +626,93 @@ public:
     }
 
     //==========================================================================
+    // Renders the label as an old dot-matrix LCD seen through cheap glossy
+    // plastic: lit dots form the glyphs over a grid of dim unlit dots, on a
+    // dark green-black screen, with a diagonal gloss sheen on top.
+    void drawDotMatrixLabel (juce::Graphics& g, juce::Label& label)
+    {
+        auto bounds = label.getLocalBounds().toFloat();
+        const auto text = label.getText().toUpperCase();
+        const auto litColour = label.findColour (juce::Label::textColourId);
+
+        // ---- Screen well: recessed dark LCD substrate ----
+        g.setColour (juce::Colours::black);
+        g.fillRoundedRectangle (bounds, 3.0f);
+        juce::ColourGradient screen (juce::Colour (0xff10140f), bounds.getCentreX(), bounds.getY(),
+                                     juce::Colour (0xff080a07), bounds.getCentreX(), bounds.getBottom(), false);
+        g.setGradientFill (screen);
+        g.fillRoundedRectangle (bounds.reduced (1.5f), 2.5f);
+
+        // ---- Dot grid ----
+        const float dotPitch = 2.6f;             // spacing between dot centres
+        const float dotRadius = 0.95f;
+        auto area = bounds.reduced (4.0f, 3.0f);
+        const int cols = juce::jmax (1, (int) (area.getWidth()  / dotPitch));
+        const int rows = juce::jmax (1, (int) (area.getHeight() / dotPitch));
+
+        // Render the text once into a cols x rows coverage mask (cached).
+        if (matrixText != text || matrixCols != cols || matrixRows != rows)
+        {
+            matrixText = text; matrixCols = cols; matrixRows = rows;
+            matrixMask = juce::Image (juce::Image::ARGB, cols, rows, true);
+            juce::Graphics mg (matrixMask);
+            mg.setColour (juce::Colours::white);
+            // Use a bold condensed font sized to fill the row height.
+            mg.setFont (juce::Font (juce::FontOptions ((float) rows * 0.95f).withStyle ("Bold")));
+            mg.drawText (text, 0, 0, cols, rows, juce::Justification::centred, false);
+        }
+
+        // Centre the grid within the area.
+        float gridW = (cols - 1) * dotPitch;
+        float gridH = (rows - 1) * dotPitch;
+        float ox = area.getCentreX() - gridW * 0.5f;
+        float oy = area.getCentreY() - gridH * 0.5f;
+
+        const juce::Colour unlit = juce::Colour (0xff1c241a);
+        for (int r = 0; r < rows; ++r)
+        {
+            for (int c = 0; c < cols; ++c)
+            {
+                float cx = ox + c * dotPitch;
+                float cy = oy + r * dotPitch;
+                float cov = matrixMask.getPixelAt (c, r).getFloatAlpha();
+                if (cov > 0.4f)
+                {
+                    g.setColour (litColour.withAlpha (juce::jmin (1.0f, 0.55f + cov * 0.45f)));
+                    g.fillEllipse (cx - dotRadius, cy - dotRadius, dotRadius * 2.0f, dotRadius * 2.0f);
+                }
+                else
+                {
+                    g.setColour (unlit);
+                    g.fillEllipse (cx - dotRadius * 0.8f, cy - dotRadius * 0.8f,
+                                   dotRadius * 1.6f, dotRadius * 1.6f);
+                }
+            }
+        }
+
+        // ---- Cheap-plastic gloss: bright diagonal sheen across the top-left ----
+        {
+            juce::Path gloss;
+            gloss.addRoundedRectangle (bounds.reduced (1.5f), 2.5f);
+            g.saveState();
+            g.reduceClipRegion (gloss);
+            juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.16f), bounds.getX(), bounds.getY(),
+                                        juce::Colours::transparentWhite, bounds.getX() + bounds.getWidth() * 0.6f,
+                                        bounds.getY() + bounds.getHeight() * 0.9f, false);
+            g.setGradientFill (sheen);
+            g.fillRect (bounds);
+            // A faint hard reflection streak near the top.
+            g.setColour (juce::Colours::white.withAlpha (0.10f));
+            g.fillRect (bounds.getX() + 2.0f, bounds.getY() + 1.5f, bounds.getWidth() - 4.0f, 1.5f);
+            g.restoreState();
+        }
+
+        // ---- Glass/plastic bezel ----
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, 1.0f);
+    }
+
+    //==========================================================================
     void setKnobColorMap (const std::map<juce::String, juce::String>* map)
     {
         knobColorMapPtr = map;
@@ -628,6 +722,11 @@ public:
 
 private:
     const std::map<juce::String, juce::String>* knobColorMapPtr = nullptr;
+
+    // Cache for the dot-matrix coverage mask (rebuilt only when text/grid changes).
+    juce::Image  matrixMask;
+    juce::String matrixText;
+    int matrixCols = 0, matrixRows = 0;
 
     juce::Colour getFaderColour (juce::Slider& slider)
     {

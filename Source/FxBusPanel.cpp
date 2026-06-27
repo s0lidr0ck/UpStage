@@ -5,6 +5,7 @@ FxBusPanel::FxBusPanel (FxBus& b)
     : bus (b)
 {
     headerLabel.setText ("MASTER", juce::dontSendNotification);
+    headerLabel.setComponentID ("strip_label");  // dot-matrix LCD rendering
     headerLabel.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
     headerLabel.setJustificationType (juce::Justification::centred);
     headerLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffcc99));

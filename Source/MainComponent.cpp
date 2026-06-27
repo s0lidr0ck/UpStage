@@ -255,6 +255,7 @@ MainComponent::MainComponent() : menuBar (this)
     {
         // Channel label - now clickable and editable
         channelLabels[i].setText ("CH " + juce::String(i + 1), juce::dontSendNotification);
+        channelLabels[i].setComponentID ("strip_label");  // dot-matrix LCD rendering
         channelLabels[i].setFont (juce::Font(juce::FontOptions().withHeight(14.0f).withStyle("Bold")));
         channelLabels[i].setJustificationType (juce::Justification::centred);
         channelLabels[i].setColour (juce::Label::textColourId, juce::Colour (0xffcccccc));
@@ -446,11 +447,10 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Input channel UI
     inputChannelLabel.setText ("INPUT", juce::dontSendNotification);
+    inputChannelLabel.setComponentID ("strip_label");  // dot-matrix LCD rendering
     inputChannelLabel.setFont (juce::Font(juce::FontOptions().withHeight(14.0f).withStyle("Bold")));
     inputChannelLabel.setJustificationType (juce::Justification::centred);
     inputChannelLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffaa66));
-    inputChannelLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff3a2a20));
-    inputChannelLabel.setColour (juce::Label::outlineColourId, juce::Colour (0xff4a3a28));
     addAndMakeVisible (inputChannelLabel);
 
     inputChannelMeterIn = std::make_unique<LevelMeter> (LevelMeter::Orientation::Vertical);
