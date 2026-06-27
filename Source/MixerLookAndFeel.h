@@ -688,17 +688,35 @@ public:
     // dark green-black screen, with a diagonal gloss sheen on top.
     void drawDotMatrixLabel (juce::Graphics& g, juce::Label& label)
     {
-        auto bounds = label.getLocalBounds().toFloat();
+        auto full = label.getLocalBounds().toFloat();
         const auto text = label.getText().toUpperCase();
         const auto litColour = label.findColour (juce::Label::textColourId);
 
-        // ---- Screen well: recessed dark LCD substrate ----
+        // ---- Recess the screen INTO the panel ----
+        // The whole display is pushed back behind the faceplate: a dark inner
+        // shadow rims the top/left (light from above), a faint lip catches the
+        // bottom/right, and the LCD substrate sits a couple px inside.
+        auto bounds = full.reduced (2.5f);   // the screen sits inset from the cutout
+
+        // Cutout shadow (dark frame around the recessed screen).
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillRoundedRectangle (full, 3.5f);
+        // Top/left inner shadow — the wall of the recess.
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.drawLine (full.getX() + 1.5f, full.getY() + 1.0f, full.getRight() - 1.5f, full.getY() + 1.0f, 1.5f);
+        g.drawLine (full.getX() + 1.0f, full.getY() + 1.5f, full.getX() + 1.0f, full.getBottom() - 1.5f, 1.5f);
+        // Bottom/right lip highlight — the near edge catching light.
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.drawLine (full.getX() + 1.5f, full.getBottom() - 0.5f, full.getRight() - 1.5f, full.getBottom() - 0.5f, 1.0f);
+        g.drawLine (full.getRight() - 0.5f, full.getY() + 1.5f, full.getRight() - 0.5f, full.getBottom() - 1.5f, 1.0f);
+
+        // ---- LCD substrate inside the recess ----
         g.setColour (juce::Colours::black);
-        g.fillRoundedRectangle (bounds, 3.0f);
+        g.fillRoundedRectangle (bounds, 2.5f);
         juce::ColourGradient screen (juce::Colour (0xff10140f), bounds.getCentreX(), bounds.getY(),
                                      juce::Colour (0xff080a07), bounds.getCentreX(), bounds.getBottom(), false);
         g.setGradientFill (screen);
-        g.fillRoundedRectangle (bounds.reduced (1.5f), 2.5f);
+        g.fillRoundedRectangle (bounds.reduced (1.0f), 2.0f);
 
         // ---- Fixed 5x7 dot-matrix font (like a real LCD character ROM) ----
         // Each glyph = 5 columns; lit dots traced from an explicit bitmap so the
@@ -709,11 +727,13 @@ public:
         if (n == 0) return;
 
         const int totalCols = n * gw + (n - 1) * charGap;
-        auto area = bounds.reduced (5.0f, 3.0f);
-        // Largest dot pitch that fits both width and height.
+        auto area = bounds.reduced (6.0f, 5.0f);
+        // Largest dot pitch that fits, capped a bit smaller so the matrix has
+        // breathing room inside the recessed screen rather than filling it.
         float pitch = juce::jmin (area.getWidth() / (float) totalCols,
                                   area.getHeight() / (float) gh);
-        float dotRadius = juce::jmax (0.7f, pitch * 0.42f);
+        pitch = juce::jmin (pitch, 3.0f);
+        float dotRadius = juce::jmax (0.7f, pitch * 0.40f);
 
         float gridW = totalCols * pitch;
         float gridH = gh * pitch;
@@ -765,9 +785,9 @@ public:
             g.restoreState();
         }
 
-        // ---- Glass/plastic bezel ----
-        g.setColour (juce::Colours::black.withAlpha (0.8f));
-        g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, 1.0f);
+        // ---- Inner bezel rim around the recessed screen ----
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.drawRoundedRectangle (bounds, 2.5f, 0.8f);
     }
 
     //==========================================================================
