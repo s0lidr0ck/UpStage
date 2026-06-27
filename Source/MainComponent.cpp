@@ -1308,6 +1308,46 @@ void MainComponent::paint (juce::Graphics& g)
         drawVDiv (d3x, tTop, tBot);
     }
 
+    // ---- Faceplate screws: phillips heads countersunk into the panel ----
+    auto drawScrew = [&g] (float cx, float cy, float angleDeg)
+    {
+        const float rad = 5.0f;
+        // Countersink shadow ring (the screw sits in a slight pit).
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillEllipse (cx - rad - 1.0f, cy - rad - 1.0f, (rad + 1.0f) * 2.0f, (rad + 1.0f) * 2.0f);
+        // Metal head with a top-lit gradient.
+        juce::ColourGradient head (juce::Colour (0xff5a564f), cx, cy - rad,
+                                   juce::Colour (0xff2a2724), cx, cy + rad, false);
+        head.addColour (0.5, juce::Colour (0xff423e39));
+        g.setGradientFill (head);
+        g.fillEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f);
+        // Rim.
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawEllipse (cx - rad, cy - rad, rad * 2.0f, rad * 2.0f, 0.8f);
+        // Phillips slot (two crossed grooves), rotated so screws look hand-driven.
+        auto rot = juce::AffineTransform::rotation (juce::degreesToRadians (angleDeg), cx, cy);
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        const float s = rad * 0.7f;
+        juce::Point<float> a1 (cx - s, cy), a2 (cx + s, cy), b1 (cx, cy - s), b2 (cx, cy + s);
+        a1.applyTransform (rot); a2.applyTransform (rot);
+        b1.applyTransform (rot); b2.applyTransform (rot);
+        g.drawLine ({ a1, a2 }, 1.3f);
+        g.drawLine ({ b1, b2 }, 1.3f);
+        // Tiny highlight catch on the upper-left of the head.
+        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.fillEllipse (cx - rad * 0.55f, cy - rad * 0.6f, rad * 0.5f, rad * 0.5f);
+    };
+
+    {
+        const float m = 11.0f;               // inset from edges
+        const float top2 = 104.0f + 6.0f;    // just below the header seam
+        const float bot2 = (float) getHeight() - 24.0f - 6.0f; // above status bar
+        drawScrew (m,         top2, 20.0f);
+        drawScrew (w - m,     top2, -35.0f);
+        drawScrew (m,         bot2, 50.0f);
+        drawScrew (w - m,     bot2, 10.0f);
+    }
+
     // ---- Channel strip backgrounds ----
     const int mixerTop = 104;
     const int statusBottom = getHeight() - 24;
