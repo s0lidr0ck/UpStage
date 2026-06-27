@@ -690,7 +690,13 @@ public:
     {
         auto full = label.getLocalBounds().toFloat();
         const auto text = label.getText().toUpperCase();
-        const auto litColour = label.findColour (juce::Label::textColourId);
+        // Lit-dot colour comes from the label's text colour (carries active/mute
+        // state), but the MASTER display gets its own cyan so it stands apart
+        // from the amber input/channel screens.
+        juce::Colour litColour = label.findColour (juce::Label::textColourId);
+        if (text == "MASTER")
+            litColour = juce::Colour (0xff66e0ff);   // cyan
+        litColour = litColour.brighter (0.25f);      // lift overall brightness
 
         // ---- Recess the screen INTO the panel ----
         // The whole display is pushed back behind the faceplate: a dark inner
@@ -713,8 +719,8 @@ public:
         // ---- LCD substrate inside the recess ----
         g.setColour (juce::Colours::black);
         g.fillRoundedRectangle (bounds, 2.5f);
-        juce::ColourGradient screen (juce::Colour (0xff10140f), bounds.getCentreX(), bounds.getY(),
-                                     juce::Colour (0xff080a07), bounds.getCentreX(), bounds.getBottom(), false);
+        juce::ColourGradient screen (juce::Colour (0xff1a2018), bounds.getCentreX(), bounds.getY(),
+                                     juce::Colour (0xff121710), bounds.getCentreX(), bounds.getBottom(), false);
         g.setGradientFill (screen);
         g.fillRoundedRectangle (bounds.reduced (1.0f), 2.0f);
 
@@ -740,7 +746,8 @@ public:
         float ox = area.getCentreX() - gridW * 0.5f + pitch * 0.5f;
         float oy = area.getCentreY() - gridH * 0.5f + pitch * 0.5f;
 
-        const juce::Colour unlit = juce::Colour (0xff1c241a);
+        // Unlit dots faintly tinted toward the lit colour, as on a real backlit LCD.
+        const juce::Colour unlit = litColour.withAlpha (0.16f);
         for (int ci = 0; ci < n; ++ci)
         {
             const uint8_t* glyph = dotFont5x7 (text[ci]);
@@ -755,6 +762,10 @@ public:
                     bool on = (bits >> row) & 1;
                     if (on)
                     {
+                        // Soft glow halo, then the bright dot core.
+                        g.setColour (litColour.withAlpha (0.30f));
+                        g.fillEllipse (cx - dotRadius * 1.6f, cy - dotRadius * 1.6f,
+                                       dotRadius * 3.2f, dotRadius * 3.2f);
                         g.setColour (litColour);
                         g.fillEllipse (cx - dotRadius, cy - dotRadius, dotRadius * 2.0f, dotRadius * 2.0f);
                     }
