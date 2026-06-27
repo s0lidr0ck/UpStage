@@ -1254,6 +1254,58 @@ void MainComponent::paint (juce::Graphics& g)
         g.restoreState();
     }
 
+    // ---- Patina: aged sheet-metal discoloration, stains and wear ----
+    // Fixed seed so it never flickers between repaints.
+    {
+        g.saveState();
+        g.reduceClipRegion (getLocalBounds());
+        juce::Random rng (1977);
+
+        // Soft mottled stains — warm (oxidation) and cool (grime) blotches.
+        for (int i = 0; i < 70; ++i)
+        {
+            float bx = rng.nextFloat() * w;
+            float by = rng.nextFloat() * h;
+            float br = 30.0f + rng.nextFloat() * 110.0f;
+            bool warm = rng.nextBool();
+            juce::Colour tint = warm ? juce::Colour (0xff5a4632)   // brownish oxidation
+                                     : juce::Colour (0xff32383a);  // cool grime
+            float a = 0.015f + rng.nextFloat() * 0.03f;
+            juce::ColourGradient blot (tint.withAlpha (a), bx, by,
+                                       tint.withAlpha (0.0f), bx + br, by + br, true);
+            g.setGradientFill (blot);
+            g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
+        }
+
+        // Darker worn/scuffed patches near high-traffic spots.
+        for (int i = 0; i < 30; ++i)
+        {
+            float bx = rng.nextFloat() * w;
+            float by = rng.nextFloat() * h;
+            float br = 12.0f + rng.nextFloat() * 40.0f;
+            float a = 0.02f + rng.nextFloat() * 0.035f;
+            juce::ColourGradient dark (juce::Colours::black.withAlpha (a), bx, by,
+                                       juce::Colours::transparentBlack, bx + br, by + br, true);
+            g.setGradientFill (dark);
+            g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
+        }
+
+        // Fine scratches — faint diagonal hairlines.
+        for (int i = 0; i < 40; ++i)
+        {
+            float sx = rng.nextFloat() * w;
+            float sy = rng.nextFloat() * h;
+            float len = 8.0f + rng.nextFloat() * 50.0f;
+            float ang = (rng.nextFloat() - 0.5f) * 0.6f;  // mostly horizontal
+            float ex = sx + std::cos (ang) * len;
+            float ey = sy + std::sin (ang) * len;
+            g.setColour ((rng.nextBool() ? juce::Colours::white : juce::Colours::black)
+                             .withAlpha (0.025f + rng.nextFloat() * 0.025f));
+            g.drawLine (sx, sy, ex, ey, 0.6f);
+        }
+        g.restoreState();
+    }
+
     // ---- Radial vignette: dark edges, slightly lighter center ----
     {
         float cx = w * 0.5f;
