@@ -1,4 +1,5 @@
 #include "NamAmpProcessor.h"
+#include "NamAmpEditor.h"
 
 #include "NAM/dsp.h"
 #include "NAM/get_dsp.h"
@@ -391,8 +392,8 @@ void NamAmpProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 }
 
 //==============================================================================
-juce::AudioProcessorEditor* NamAmpProcessor::createEditor() { return nullptr; } // editor lands in Task 4
-bool NamAmpProcessor::hasEditor() const { return false; }
+juce::AudioProcessorEditor* NamAmpProcessor::createEditor() { return new NamAmpEditor (*this); }
+bool NamAmpProcessor::hasEditor() const { return true; }
 
 void NamAmpProcessor::getStateInformation (juce::MemoryBlock& destData)
 {

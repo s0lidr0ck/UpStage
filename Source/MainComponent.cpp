@@ -64,9 +64,15 @@ MainComponent::MainComponent() : menuBar (this)
                     r << "knob roundtrip: " << (std::abs (amp->bassKnob.load() - 7.5f) < 0.01f ? "PASS" : "FAIL") << "\n";
                 }
 
-                channels[0]->removePlugin (0);   // leave the app clean
-                r << "removed, numPlugins now: " << channels[0]->getNumPlugins() << "\n";
-                scratch.getChildFile ("amp_chain_selftest.txt").replaceWithText (r);
+                // Open the editor through the real window path, let it paint,
+                // then remove the row (must close the window per disposal rule).
+                channels[0]->openPluginEditor (0);
+                juce::Timer::callAfterDelay (600, [this, scratch, r]() mutable
+                {
+                    channels[0]->removePlugin (0);   // leave the app clean
+                    r << "editor opened+closed, numPlugins now: " << channels[0]->getNumPlugins() << "\n";
+                    scratch.getChildFile ("amp_chain_selftest.txt").replaceWithText (r);
+                });
             });
         });
     }
