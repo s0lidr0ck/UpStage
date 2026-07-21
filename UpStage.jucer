@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="UpStage" name="UpStage" projectType="guiapp" version="0.4.0"
               jucePath="C:\JUCE" displaySplashScreen="0" reportAppUsage="0"
@@ -90,6 +90,58 @@
             resource="0" file="Source/PluginBrowserWindow.h"/>
       <FILE id="PluginBrowserWindowCpp" name="PluginBrowserWindow.cpp" compile="1"
             resource="0" file="Source/PluginBrowserWindow.cpp"/>
+      <FILE id="LooperH" name="Looper.h" compile="0" resource="0" file="Source/Looper.h"/>
+      <FILE id="LooperCpp" name="Looper.cpp" compile="1" resource="0" file="Source/Looper.cpp"/>
+      <FILE id="MetronomeH" name="Metronome.h" compile="0" resource="0" file="Source/Metronome.h"/>
+      <FILE id="MetronomeCpp" name="Metronome.cpp" compile="1" resource="0" file="Source/Metronome.cpp"/>
+      <FILE id="PluginScannerCpp" name="PluginScanner.cpp" compile="0" resource="0"
+            file="Source/PluginScanner.cpp"/>
+      <FILE id="SongBarH" name="SongBar.h" compile="0" resource="0" file="Source/SongBar.h"/>
+      <FILE id="SongBarCpp" name="SongBar.cpp" compile="1" resource="0" file="Source/SongBar.cpp"/>
+      <FILE id="CassetteDeckWindowH" name="CassetteDeckWindow.h" compile="0"
+            resource="0" file="Source/CassetteDeckWindow.h"/>
+      <FILE id="GoniometerMeterH" name="GoniometerMeter.h" compile="0" resource="0"
+            file="Source/GoniometerMeter.h"/>
+      <FILE id="HardwareModuleWindowH" name="HardwareModuleWindow.h" compile="0"
+            resource="0" file="Source/HardwareModuleWindow.h"/>
+      <FILE id="LoadingOverlayH" name="LoadingOverlay.h" compile="0" resource="0"
+            file="Source/LoadingOverlay.h"/>
+      <FILE id="LoopStationWindowH" name="LoopStationWindow.h" compile="0"
+            resource="0" file="Source/LoopStationWindow.h"/>
+      <FILE id="MetronomeWindowH" name="MetronomeWindow.h" compile="0" resource="0"
+            file="Source/MetronomeWindow.h"/>
+      <FILE id="MidiMonitorWindowH" name="MidiMonitorWindow.h" compile="0"
+            resource="0" file="Source/MidiMonitorWindow.h"/>
+      <FILE id="MidiRulesPanelH" name="MidiRulesPanel.h" compile="0" resource="0"
+            file="Source/MidiRulesPanel.h"/>
+      <FILE id="ReelRecorderWindowH" name="ReelRecorderWindow.h" compile="0"
+            resource="0" file="Source/ReelRecorderWindow.h"/>
+      <FILE id="SongBarStereoH" name="StereoSpreadMeter.h" compile="0" resource="0"
+            file="Source/StereoSpreadMeter.h"/>
+      <FILE id="UndoActionsH" name="UndoActions.h" compile="0" resource="0"
+            file="Source/UndoActions.h"/>
+      <FILE id="VuMeterH" name="VuMeter.h" compile="0" resource="0" file="Source/VuMeter.h"/>
+    </GROUP>
+    <GROUP id="ThirdPartyNAM" name="ThirdParty-NAM">
+      <FILE id="NamActCpp" name="activations.cpp" compile="1" resource="0"
+            file="ThirdParty/NeuralAmpModelerCore/NAM/activations.cpp"/>
+      <FILE id="NamContCpp" name="container.cpp" compile="1" resource="0"
+            file="ThirdParty/NeuralAmpModelerCore/NAM/container.cpp"/>
+      <FILE id="NamConv1Cpp" name="conv1d.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/conv1d.cpp"/>
+      <FILE id="NamConvNCpp" name="convnet.cpp" compile="1" resource="0"
+            file="ThirdParty/NeuralAmpModelerCore/NAM/convnet.cpp"/>
+      <FILE id="NamDspCpp" name="dsp.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/dsp.cpp"/>
+      <FILE id="NamGetDspCpp" name="get_dsp.cpp" compile="1" resource="0"
+            file="ThirdParty/NeuralAmpModelerCore/NAM/get_dsp.cpp"/>
+      <FILE id="NamLinCpp" name="linear.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/linear.cpp"/>
+      <FILE id="NamLstmCpp" name="lstm.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/lstm.cpp"/>
+      <FILE id="NamRingCpp" name="ring_buffer.cpp" compile="1" resource="0"
+            file="ThirdParty/NeuralAmpModelerCore/NAM/ring_buffer.cpp"/>
+      <FILE id="NamUtilCpp" name="util.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/util.cpp"/>
+      <FILE id="NamWnA2Cpp" name="a2_fast.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/wavenet/a2_fast.cpp"/>
+      <FILE id="NamWnModCpp" name="model.cpp" compile="1" resource="0" file="ThirdParty/NeuralAmpModelerCore/NAM/wavenet/model.cpp"/>
+      <FILE id="NamWnSlimCpp" name="slimmable.cpp" compile="1" resource="0"
+            file="ThirdParty/NeuralAmpModelerCore/NAM/wavenet/slimmable.cpp"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>
@@ -102,26 +154,28 @@
     <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0"/>
     <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>
     <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0"/>
     <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>
     <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
     <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
     <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
   </MODULES>
   <EXPORTFORMATS>
-    <VS2022 targetFolder="Builds/VisualStudio2025" extraSearchPaths="$(JUCE_PATH)&#10;$(JUCE_PATH)/modules/juce_audio_processors/format_types/VST3_SDK&#10;C:\VST_SDK\vst3sdk"
-            vst3Path="C:\VST_SDK\vst3sdk" toolset="v145" cppLanguageStandard="17">
+    <VS2022 targetFolder="Builds/VisualStudio2022" extraSearchPaths="$(JUCE_PATH)&#10;$(JUCE_PATH)/modules/juce_audio_processors/format_types/VST3_SDK&#10;C:\VST_SDK\vst3sdk&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann"
+            vst3Path="C:\VST_SDK\vst3sdk" toolset="v143" cppLanguageStandard="17">
       <CONFIGURATIONS>
         <CONFIGURATION name="Debug" isDebug="1" optimisation="1" targetName="UpStage"
-                       preprocessorDefs="JUCE_PLUGINHOST_VST3=1" headerPath="C:\VST_SDK\vst3sdk"
-                       defines="JUCE_PLUGINHOST_VST3=1"/>
+                       preprocessorDefs="JUCE_PLUGINHOST_VST3=1&#10;NAM_SAMPLE_FLOAT=1&#10;NAM_ENABLE_A2_FAST=1"
+                       headerPath="C:\VST_SDK\vst3sdk&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann" defines="JUCE_PLUGINHOST_VST3=1"/>
         <CONFIGURATION name="Release" isDebug="0" optimisation="3" targetName="UpStage"
-                       preprocessorDefs="JUCE_PLUGINHOST_VST3=1" headerPath="C:\VST_SDK\vst3sdk"
-                       defines="JUCE_PLUGINHOST_VST3=1"/>
+                       preprocessorDefs="JUCE_PLUGINHOST_VST3=1&#10;NAM_SAMPLE_FLOAT=1&#10;NAM_ENABLE_A2_FAST=1"
+                       headerPath="C:\VST_SDK\vst3sdk&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann" defines="JUCE_PLUGINHOST_VST3=1"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_processors_headless" path="C:\JUCE\modules"/>
       </MODULEPATHS>
     </VS2022>
   </EXPORTFORMATS>
-  <JUCEOPTIONS JUCE_PLUGINHOST_VST3="1" JUCE_PLUGINHOST_VST="0" JUCE_PLUGINHOST_AU="0" JUCE_ASIO="1"/>
+  <JUCEOPTIONS JUCE_PLUGINHOST_VST3="1" JUCE_PLUGINHOST_VST="0" JUCE_PLUGINHOST_AU="0"
+               JUCE_ASIO="1"/>
 </JUCERPROJECT>
