@@ -27,6 +27,10 @@
 #include "MidiRulesPanel.h"
 #include "SongBar.h"
 #include "LoadingOverlay.h"
+#include "CassetteDeckWindow.h"
+#include "LoopStationWindow.h"
+#include "MetronomeWindow.h"
+#include "ReelRecorderWindow.h"
 
 /**
  * MainComponent  v0.4 - Mixer-Style Layout
@@ -253,7 +257,6 @@ private:
 
     // Metronome
     juce::TextButton  metronomeButton  { "Metro" };
-    int               metroFlashCounter = 0;
 
     // Looper
     juce::TextButton  loopRecButton    { "Loop" };
@@ -333,6 +336,12 @@ private:
 
     // Tuner panel (hidden until activated)
     TunerPanel tunerPanel;
+
+    // Hardware module windows opened from toolbar icons
+    std::unique_ptr<CassetteDeckWindow> cassetteDeckWindow;
+    std::unique_ptr<LoopStationWindow>  loopStationWindow;
+    std::unique_ptr<MetronomeWindow>    metronomeWindow;
+    std::unique_ptr<ReelRecorderWindow> reelRecorderWindow;
 
     // MIDI activity LED + monitor
     juce::Label midiLedLabel;
@@ -423,7 +432,6 @@ private:
     };
 
     void showPluginManager();
-    void showMetronomeSettings();
     void showShortcutHelp();
     void showMidiRulesEditor();
     void autosave();

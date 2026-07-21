@@ -66,7 +66,7 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Transport buttons - console style
     for (auto* b : { &tapButton, &tunerButton, &panicButton,
-                     &recordButton, &stopRecordButton,
+                     &recordButton,
                      &metronomeButton, &loopRecButton,
                      &routingModeButton, &toolbarExpandButton })
     {
@@ -78,7 +78,6 @@ MainComponent::MainComponent() : menuBar (this)
     panicButton.setComponentID ("icon_panic");
     recordButton.setComponentID ("icon_rec");
     playLoopButton.setComponentID ("icon_play");
-    stopRecordButton.setComponentID ("icon_stop");
     metronomeButton.setComponentID ("icon_metro");
     loopRecButton.setComponentID ("icon_loop");
     tapButton.setComponentID ("icon_tap");
@@ -98,22 +97,20 @@ MainComponent::MainComponent() : menuBar (this)
     recordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3a1a1a));
     recordButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffcc4444));
     recordButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffcc2222));
-    recordButton.setTooltip ("Record dry + wet to disk. Right-click: reveal recordings folder.");
+    recordButton.setColour (juce::TextButton::textColourOnId, juce::Colour (0xffff8888));
+    recordButton.setTooltip ("Open the Reel Recorder: choose dry/wet/both, folder, then REC/STOP.");
 
-    stopRecordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2a2a));
-    stopRecordButton.setTooltip ("Stop recording. Right-click: reveal recordings folder.");
+    stopRecordButton.setVisible (false);  // recording stop now lives in the Reel Recorder window
 
     metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2a3a));
     metronomeButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff9999cc));
-    metronomeButton.addMouseListener (this, false);
-    metronomeButton.setTooltip ("Click: toggle metronome. Right-click: BPM, time sig, "
-                                "subdivision, sound, volume.");
+    metronomeButton.setColour (juce::TextButton::textColourOnId, juce::Colour (0xffccccff));
+    metronomeButton.setTooltip ("Open the Metronome: start/stop, BPM, time sig, subdivision, sound, volume.");
 
     loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
     loopRecButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88cc88));
-    loopRecButton.addMouseListener (this, false);
-    loopRecButton.setTooltip ("Click: cycle record/overdub/play. Double-click: overdub. "
-                              "Right-click: count-in, meter, length, capture, export.");
+    loopRecButton.setColour (juce::TextButton::textColourOnId, juce::Colour (0xffbbffbb));
+    loopRecButton.setTooltip ("Open the Loop Station: record, overdub, play, and loop settings.");
 
     looperProgressLabel.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
     looperProgressLabel.setJustificationType (juce::Justification::centred);
@@ -129,8 +126,7 @@ MainComponent::MainComponent() : menuBar (this)
             {
                 metronome.setBPM (tapTempo.getBPM());
                 metronome.setTimeSignature (looper.getMeterNum(), looper.getMeterDen());
-                metronome.setEnabled (true);
-                metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff4444aa));
+                metronome.setEnabled (true);  // toolbar icon lit state follows in timerCallback
             }
         });
     };
@@ -140,8 +136,7 @@ MainComponent::MainComponent() : menuBar (this)
         {
             if (looper.getCountInBeats() > 0 && metronome.isEnabled())
             {
-                metronome.setEnabled (false);
-                metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2a3a));
+                metronome.setEnabled (false);  // toolbar icon lit state follows in timerCallback
             }
         });
     };
@@ -174,6 +169,8 @@ MainComponent::MainComponent() : menuBar (this)
     addAndMakeVisible (playLoopButton);
     playLoopButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff1a3a1a));
     playLoopButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff44cc44));
+    playLoopButton.setColour (juce::TextButton::textColourOnId, juce::Colour (0xff66ff66));
+    playLoopButton.setTooltip ("Cassette deck: play an audio file through your chain to audition tones.");
     stopRecordButton.setEnabled (false);
 
     loopFileLabel.setText ("No file", juce::dontSendNotification);
@@ -1415,9 +1412,9 @@ void MainComponent::paint (juce::Graphics& g)
 
         int tTop = 70, tBot = 98;   // within the toolbar module face
 
-        // Separate the logical button groups (transport | rec/play/stop | mod).
+        // Separate the logical button groups (utility | rec/play | mod).
         int d1x = (panicButton.getRight() + recordButton.getX()) / 2;
-        int d2x = (stopRecordButton.getRight() + metronomeButton.getX()) / 2;
+        int d2x = (playLoopButton.getRight() + metronomeButton.getX()) / 2;
 
         drawVDiv (d1x, tTop, tBot);
         drawVDiv (d2x, tTop, tBot);
@@ -1771,130 +1768,6 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // Right-click on record button — reveal recordings folder
-    if (e.mods.isRightButtonDown() && (e.eventComponent == &recordButton || e.eventComponent == &stopRecordButton))
-    {
-        auto folder = recorder.getLastOutputFolder();
-        if (! folder.isDirectory())
-        {
-            folder = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                         .getChildFile ("UpStage Recordings");
-            if (currentProject.recordOutputFolder.isNotEmpty())
-                folder = juce::File (currentProject.recordOutputFolder);
-        }
-        if (folder.isDirectory())
-            folder.revealToUser();
-        return;
-    }
-
-    // Right-click on looper button — settings menu
-    if (e.mods.isRightButtonDown() && e.eventComponent == &loopRecButton)
-    {
-        juce::PopupMenu menu;
-
-        menu.addItem (1, "Clear Loop");
-        menu.addSeparator();
-
-        juce::PopupMenu countInMenu;
-        int curCI = looper.getCountInBeats();
-        countInMenu.addItem (10, "Off",    true, curCI == 0);
-        countInMenu.addItem (11, "2 beats", true, curCI == 2);
-        countInMenu.addItem (12, "4 beats", true, curCI == 4);
-        countInMenu.addItem (13, "8 beats", true, curCI == 8);
-        menu.addSubMenu ("Count-In", countInMenu);
-
-        juce::PopupMenu meterMenu;
-        int curNum = looper.getMeterNum();
-        int curDen = looper.getMeterDen();
-        meterMenu.addItem (20, "3/4", true, curNum == 3 && curDen == 4);
-        meterMenu.addItem (21, "4/4", true, curNum == 4 && curDen == 4);
-        meterMenu.addItem (22, "5/4", true, curNum == 5 && curDen == 4);
-        meterMenu.addItem (23, "6/8", true, curNum == 6 && curDen == 8);
-        meterMenu.addItem (24, "7/8", true, curNum == 7 && curDen == 8);
-        menu.addSubMenu ("Meter", meterMenu);
-
-        juce::PopupMenu barsMenu;
-        int curBars = looper.getLoopBars();
-        barsMenu.addItem (30, "Free",    true, curBars == 0);
-        barsMenu.addItem (31, "1 bar",   true, curBars == 1);
-        barsMenu.addItem (32, "2 bars",  true, curBars == 2);
-        barsMenu.addItem (33, "4 bars",  true, curBars == 4);
-        barsMenu.addItem (34, "8 bars",  true, curBars == 8);
-        barsMenu.addItem (35, "16 bars", true, curBars == 16);
-        menu.addSubMenu ("Loop Length", barsMenu);
-
-        menu.addSeparator();
-
-        juce::PopupMenu captureMenu;
-        auto curCap = looper.getCapturePoint();
-        captureMenu.addItem (40, "Output (post-FX)", true, curCap == Looper::CapturePoint::Output);
-        captureMenu.addItem (41, "Input (pre-FX)",   true, curCap == Looper::CapturePoint::Input);
-        menu.addSubMenu ("Capture", captureMenu);
-
-        menu.addSeparator();
-        menu.addItem (50, "Export Loop as WAV...", looper.getLoopLengthSamples() > 0);
-
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loopRecButton),
-            [this] (int result)
-            {
-                if (result == 1)  { looper.clear(); return; }
-
-                if (result == 10) looper.setCountInBeats (0);
-                if (result == 11) looper.setCountInBeats (2);
-                if (result == 12) looper.setCountInBeats (4);
-                if (result == 13) looper.setCountInBeats (8);
-
-                if (result == 20) looper.setMeter (3, 4);
-                if (result == 21) looper.setMeter (4, 4);
-                if (result == 22) looper.setMeter (5, 4);
-                if (result == 23) looper.setMeter (6, 8);
-                if (result == 24) looper.setMeter (7, 8);
-
-                if (result == 30) looper.setLoopBars (0);
-                if (result == 31) looper.setLoopBars (1);
-                if (result == 32) looper.setLoopBars (2);
-                if (result == 33) looper.setLoopBars (4);
-                if (result == 34) looper.setLoopBars (8);
-                if (result == 35) looper.setLoopBars (16);
-
-                if (result == 40) looper.setCapturePoint (Looper::CapturePoint::Output);
-                if (result == 41) looper.setCapturePoint (Looper::CapturePoint::Input);
-
-                if (result == 50)
-                {
-                    auto defaultFolder = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                        .getChildFile ("UpStage Recordings");
-                    defaultFolder.createDirectory();
-
-                    auto now = juce::Time::getCurrentTime();
-                    auto defaultName = "UpStage_Loop_" + now.formatted ("%Y%m%d_%H%M%S") + ".wav";
-
-                    fileChooser = std::make_unique<juce::FileChooser> (
-                        "Export Loop", defaultFolder.getChildFile (defaultName), "*.wav");
-
-                    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode
-                        | juce::FileBrowserComponent::canSelectFiles,
-                        [this] (const juce::FileChooser& fc)
-                        {
-                            auto file = fc.getResult();
-                            if (file != juce::File())
-                            {
-                                if (looper.exportToFile (file))
-                                    file.revealToUser();
-                            }
-                        });
-                }
-            });
-        return;
-    }
-
-    // Right-click on metronome button — open settings
-    if (e.mods.isRightButtonDown() && e.eventComponent == &metronomeButton)
-    {
-        showMetronomeSettings();
-        return;
-    }
-
     // Click on MIDI LED — toggle MIDI monitor window
     if (e.eventComponent == &midiLedLabel)
     {
@@ -1908,125 +1781,10 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
     }
 }
 
-void MainComponent::mouseDoubleClick (const juce::MouseEvent& e)
+void MainComponent::mouseDoubleClick (const juce::MouseEvent& /*e*/)
 {
-    if (e.eventComponent == &loopRecButton)
-    {
-        looper.setBPM (tapTempo.getBPM());
-        looper.startOverdub();
-    }
-}
-
-void MainComponent::showMetronomeSettings()
-{
-    juce::PopupMenu menu;
-
-    // BPM
-    juce::PopupMenu bpmMenu;
-    for (int b : { 60, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180, 200 })
-        bpmMenu.addItem (1000 + b, juce::String (b) + " BPM",
-                         true, (int) metronome.getBPM() == b);
-    menu.addSubMenu ("BPM", bpmMenu);
-
-    // Time signature
-    juce::PopupMenu meterMenu;
-    int curNum = metronome.getNumerator();
-    int curDen = metronome.getDenominator();
-    for (auto& ts : std::vector<std::pair<int,int>>{ {2,4}, {3,4}, {4,4}, {5,4}, {6,8}, {7,8}, {12,8} })
-    {
-        juce::String label = juce::String (ts.first) + "/" + juce::String (ts.second);
-        meterMenu.addItem (2000 + ts.first * 100 + ts.second, label,
-                           true, ts.first == curNum && ts.second == curDen);
-    }
-    menu.addSubMenu ("Meter", meterMenu);
-
-    // Subdivision
-    juce::PopupMenu subMenu;
-    int curSub = metronome.getSubdivision();
-    subMenu.addItem (3001, "None (quarter)",   true, curSub == 1);
-    subMenu.addItem (3002, "8th notes",        true, curSub == 2);
-    subMenu.addItem (3003, "8th triplets",     true, curSub == 3);
-    subMenu.addItem (3004, "16th notes",       true, curSub == 4);
-    menu.addSubMenu ("Subdivision", subMenu);
-
-    menu.addSeparator();
-
-    // Sound
-    juce::PopupMenu soundMenu;
-    auto curSound = metronome.getClickSound();
-    soundMenu.addItem (4001, "Sine (clean)",   true, curSound == Metronome::ClickSound::Sine);
-    soundMenu.addItem (4002, "Tick (snappy)",  true, curSound == Metronome::ClickSound::Tick);
-    soundMenu.addItem (4003, "Woodblock",      true, curSound == Metronome::ClickSound::Woodblock);
-    menu.addSubMenu ("Sound", soundMenu);
-
-    // Accent
-    menu.addItem (5001, metronome.isAccentEnabled() ? "Accent: ON" : "Accent: OFF");
-
-    // Accent frequency
-    juce::PopupMenu accentFreqMenu;
-    int curAF = (int) metronome.getAccentFreq();
-    for (int f : { 1000, 1200, 1500, 1800, 2000, 2500 })
-        accentFreqMenu.addItem (6000 + f, juce::String (f) + " Hz", true, f == curAF);
-    menu.addSubMenu ("Accent Pitch", accentFreqMenu);
-
-    // Normal frequency
-    juce::PopupMenu normFreqMenu;
-    int curNF = (int) metronome.getNormalFreq();
-    for (int f : { 600, 800, 1000, 1200, 1500 })
-        normFreqMenu.addItem (7000 + f, juce::String (f) + " Hz", true, f == curNF);
-    menu.addSubMenu ("Click Pitch", normFreqMenu);
-
-    menu.addSeparator();
-
-    // Volume
-    juce::PopupMenu volMenu;
-    int curVol = (int)(metronome.getVolume() * 100.0f);
-    for (int v : { 25, 50, 75, 100 })
-        volMenu.addItem (8000 + v, juce::String (v) + "%", true, std::abs (curVol - v) < 5);
-    menu.addSubMenu ("Volume", volMenu);
-
-    menu.showMenuAsync ({}, [this] (int result)
-    {
-        if (result <= 0) return;
-
-        if (result >= 1000 && result < 2000)
-        {
-            int bpm = result - 1000;
-            metronome.setBPM ((double) bpm);
-            tapTempo.setBPM ((double) bpm);
-        }
-        else if (result >= 2000 && result < 3000)
-        {
-            int encoded = result - 2000;
-            int num = encoded / 100;
-            int den = encoded % 100;
-            metronome.setTimeSignature (num, den);
-        }
-        else if (result >= 3001 && result <= 3004)
-        {
-            metronome.setSubdivision (result - 3000);
-        }
-        else if (result >= 4001 && result <= 4003)
-        {
-            metronome.setClickSound (static_cast<Metronome::ClickSound> (result - 4001));
-        }
-        else if (result == 5001)
-        {
-            metronome.setAccentEnabled (! metronome.isAccentEnabled());
-        }
-        else if (result >= 6000 && result < 7000)
-        {
-            metronome.setAccentFreq ((double)(result - 6000));
-        }
-        else if (result >= 7000 && result < 8000)
-        {
-            metronome.setNormalFreq ((double)(result - 7000));
-        }
-        else if (result >= 8000 && result < 9000)
-        {
-            metronome.setVolume ((float)(result - 8000) / 100.0f);
-        }
-    });
+    // Looper overdub used to live on a hidden double-click; it now has its own
+    // OVERDUB footswitch in the Loop Station window.
 }
 
 void MainComponent::mouseDrag (const juce::MouseEvent& e)
@@ -2306,12 +2064,10 @@ void MainComponent::resized()
     panicButton.setBounds (transport.removeFromLeft (bw));
     transport.removeFromLeft (8);
 
-    // Transport: Rec | Play | Stop - cassette style
+    // Transport: Rec (recorder) | Play (cassette deck)
     recordButton.setBounds (transport.removeFromLeft (bwNarrow));
     transport.removeFromLeft (3);
     playLoopButton.setBounds (transport.removeFromLeft (bwNarrow));
-    transport.removeFromLeft (3);
-    stopRecordButton.setBounds (transport.removeFromLeft (bwNarrow));
     transport.removeFromLeft (8);
 
     // Metronome, Looper, and Routing
@@ -2497,8 +2253,11 @@ void MainComponent::buttonClicked (juce::Button* b)
     }
     else if (b == &playLoopButton)
     {
-        inputRouter.setLoopPlaying (! inputRouter.isLoopPlaying());
-        playLoopButton.setButtonText (inputRouter.isLoopPlaying() ? "Pause" : "Play");
+        // Opens the cassette deck (loop-file player). The icon lights while the
+        // tape is rolling; transport lives inside the deck window.
+        if (cassetteDeckWindow == nullptr)
+            cassetteDeckWindow = std::make_unique<CassetteDeckWindow> (inputRouter);
+        cassetteDeckWindow->toggleVisible();
     }
 
     // Tap tempo
@@ -2521,7 +2280,7 @@ void MainComponent::buttonClicked (juce::Button* b)
         tunerPanel.tunerActive = ! showing;
         outputMuted = ! showing;
         tunerPanel.setVisible (! showing);
-        tunerButton.setButtonText (showing ? "Tuner" : "Tuner ON");
+        tunerButton.setToggleState (! showing, juce::dontSendNotification);  // lit while active
         resized();
     }
 
@@ -2531,69 +2290,36 @@ void MainComponent::buttonClicked (juce::Button* b)
     // Gate toggle
     else if (b == &gateToggle) { noiseGate.enabled = gateToggle.getToggleState(); }
 
-    // Record
+    // Record — opens the Reel Recorder window (capture mode, folder, REC/STOP inside).
     else if (b == &recordButton)
     {
-        Recorder::Mode mode = Recorder::Mode::Both;
-
-        juce::File folder = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                .getChildFile ("UpStage Recordings");
-        if (currentProject.recordOutputFolder.isNotEmpty())
-            folder = juce::File (currentProject.recordOutputFolder);
-
-        recorder.startRecording (folder, mode);
-        recordButton    .setEnabled (false);
-        stopRecordButton.setEnabled (true);
-    }
-    else if (b == &stopRecordButton)
-    {
-        auto recFolder = recorder.getLastOutputFolder();
-        recorder.stopRecording();
-        recordButton    .setEnabled (true);
-        stopRecordButton.setEnabled (false);
-
-        if (recFolder.isDirectory())
-            statusLabel.setText ("Saved to: " + recFolder.getFullPathName(),
-                                juce::dontSendNotification);
-
-        if (looper.getState() != Looper::State::Idle)
-        {
-            looper.stop();
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
-        }
+        if (reelRecorderWindow == nullptr)
+            reelRecorderWindow = std::make_unique<ReelRecorderWindow> (recorder, [this]
+            {
+                if (currentProject.recordOutputFolder.isNotEmpty())
+                    return juce::File (currentProject.recordOutputFolder);
+                return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                           .getChildFile ("UpStage Recordings");
+            });
+        reelRecorderWindow->toggleVisible();
     }
 
-    // Metronome
+    // Metronome — opens the Metronome window (START/STOP + all settings inside).
     else if (b == &metronomeButton)
     {
-        metronome.setEnabled (! metronome.isEnabled());
-        if (metronome.isEnabled())
-            metronome.setBPM (tapTempo.getBPM());
-        metronomeButton.setColour (juce::TextButton::buttonColourId,
-            metronome.isEnabled() ? juce::Colour (0xff4444aa) : juce::Colour (0xff2a2a3a));
+        if (metronomeWindow == nullptr)
+            metronomeWindow = std::make_unique<MetronomeWindow> (metronome,
+                [this] (double bpm) { tapTempo.setBPM (bpm); });
+        metronomeWindow->toggleVisible();
     }
 
-    // Looper — single click: record (first layer) / play-stop / finish recording
+    // Looper — opens the Loop Station window (discrete Rec/Overdub/Play/Clear).
     else if (b == &loopRecButton)
     {
-        looper.setBPM (tapTempo.getBPM());
-        auto ls = looper.getState();
-
-        if (ls == Looper::State::Idle)
-        {
-            if (looper.getLoopLengthSamples() > 0)
-                looper.togglePlayStop();
-            else
-                looper.toggleRecord();
-        }
-        else if (ls == Looper::State::Recording || ls == Looper::State::CountIn)
-        {
-            looper.toggleRecord();
-        }
-        else
-        {
-            looper.togglePlayStop();
-        }
+        if (loopStationWindow == nullptr)
+            loopStationWindow = std::make_unique<LoopStationWindow> (
+                looper, [this] { return tapTempo.getBPM(); });
+        loopStationWindow->toggleVisible();
     }
 
     // Routing mode
@@ -2697,18 +2423,18 @@ void MainComponent::timerCallback()
     }
 
 
-    // Metronome beat flash
-    if (metronome.isEnabled() && metronome.consumeBeatFlash())
-    {
-        metronomeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff6666cc));
-        metroFlashCounter = 4;
-    }
-    else if (metroFlashCounter > 0)
-    {
-        if (--metroFlashCounter == 0)
-            metronomeButton.setColour (juce::TextButton::buttonColourId,
-                metronome.isEnabled() ? juce::Colour (0xff4444aa) : juce::Colour (0xff2a2a3a));
-    }
+    // Metronome: light the toolbar icon while running. The per-beat pendulum
+    // animation lives in the Metronome window (it owns consumeBeatFlash()).
+    if (metronomeButton.getToggleState() != metronome.isEnabled())
+        metronomeButton.setToggleState (metronome.isEnabled(), juce::dontSendNotification);
+
+    // Cassette deck: light the play icon while the tape is rolling.
+    if (playLoopButton.getToggleState() != inputRouter.isLoopPlaying())
+        playLoopButton.setToggleState (inputRouter.isLoopPlaying(), juce::dontSendNotification);
+
+    // Reel recorder: light the record icon red while recording to disk.
+    if (recordButton.getToggleState() != recorder.isRecording())
+        recordButton.setToggleState (recorder.isRecording(), juce::dontSendNotification);
 
     // Scene save flash
     if (sceneFlashCounter > 0)
@@ -2760,11 +2486,15 @@ void MainComponent::timerCallback()
             return juce::String (bar) + "." + juce::String (beat);
         };
 
+        // The toolbar icon shows active/inactive (lit via toggle state) and the
+        // backlit colour reflects the current state; the bar.beat readout lives
+        // in the adjacent progress label. Full controls are in the Loop Station.
+        juce::Colour litColour = juce::Colour (0xff228822);  // playing = green
+
         if (ls == Looper::State::Idle)
         {
             looperProgressLabel.setText ("", juce::dontSendNotification);
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x00000000));
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a3a2a));
         }
         else if (ls == Looper::State::CountIn)
         {
@@ -2776,7 +2506,7 @@ void MainComponent::timerCallback()
             looperProgressLabel.setColour (juce::Label::textColourId,
                 flash ? juce::Colour (0xffffcc44) : juce::Colour (0xffaa8822));
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x30ffaa00));
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff886622));
+            litColour = juce::Colour (0xff886622);  // count-in = amber
         }
         else if (ls == Looper::State::Recording)
         {
@@ -2786,7 +2516,7 @@ void MainComponent::timerCallback()
             looperProgressLabel.setColour (juce::Label::textColourId,
                 flash ? juce::Colour (0xffff4444) : juce::Colour (0xffaa2222));
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x30ff0000));
-            loopRecButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff882222));
+            litColour = juce::Colour (0xffcc2222);  // recording = red
         }
         else
         {
@@ -2802,11 +2532,16 @@ void MainComponent::timerCallback()
                 : isPending ? juce::Colour (0xffaaaa44)
                 : juce::Colour (0xff88cc88));
             looperProgressLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0x00000000));
-            loopRecButton.setColour (juce::TextButton::buttonColourId,
-                isDubbing ? juce::Colour (0xff886622)
-                : isPending ? juce::Colour (0xff666622)
-                : juce::Colour (0xff228822));
+            litColour = isDubbing ? juce::Colour (0xffccaa44)
+                      : isPending ? juce::Colour (0xff888822)
+                      : juce::Colour (0xff228822);
         }
+
+        // Light the toolbar loop icon whenever the looper is active, tinted by state.
+        loopRecButton.setColour (juce::TextButton::buttonOnColourId, litColour);
+        bool looperActive = (ls != Looper::State::Idle);
+        if (loopRecButton.getToggleState() != looperActive)
+            loopRecButton.setToggleState (looperActive, juce::dontSendNotification);
     }
 
     // MIDI activity LED
@@ -2898,10 +2633,7 @@ void MainComponent::midiLearnParameterChanged (const juce::String& paramID, floa
     }
     else if (paramID == "metroToggle")
     {
-        bool on = value >= 0.5f;
-        metronome.setEnabled (on);
-        metronomeButton.setColour (juce::TextButton::buttonColourId,
-            on ? juce::Colour (0xff4444aa) : juce::Colour (0xff2a2a3a));
+        metronome.setEnabled (value >= 0.5f);  // toolbar icon lit state follows in timerCallback
     }
     else
     {
