@@ -90,7 +90,7 @@ MainComponent::MainComponent() : menuBar (this)
 
                 if (amp->hasModel (0))
                 {
-                    auto runBlock = [&amp]
+                    auto runBlock = [amp]
                     {
                         juce::AudioBuffer<float> buf (2, 512);
                         for (int i = 0; i < 512; ++i)
@@ -128,6 +128,53 @@ MainComponent::MainComponent() : menuBar (this)
                           << " nonSilent: " << (liteRms > 0.0001f ? "PASS" : "FAIL") << "\n";
                         amp->setUseLite (false);
                     }
+
+                    // Dual mode: same rig on side B; with polarity flip and a
+                    // centered blend the parallel paths must null (proves the
+                    // two sides stay sample-aligned).
+                    const auto rigIdA = amp->getRigId (0);
+                    amp->loadRig (1, rigIdA);
+                    auto dualCheck = std::make_shared<std::function<void (int)>>();
+                    *dualCheck = [amp, scratch, r, runBlock, dualCheck] (int tries) mutable
+                    {
+                        if (! amp->hasModel (1) && ! amp->didModelFail (1) && tries < 30)
+                        {
+                            juce::Timer::callAfterDelay (500, [dualCheck, tries] { (*dualCheck) (tries + 1); });
+                            return;
+                        }
+
+                        amp->dualMode = true;
+                        amp->blend = 0.5f;
+                        amp->panA = 0.0f;
+                        amp->panB = 0.0f;
+
+                        auto [dualRms, in1] = runBlock();
+                        r << "dual (A+B same rig): outRMS=" << juce::String (dualRms, 5)
+                          << " nonSilent: " << (dualRms > 0.0001f ? "PASS" : "FAIL") << "\n";
+
+                        amp->polarityFlipB = true;
+                        auto [nullRms, in2] = runBlock();
+                        juce::ignoreUnused (in1, in2);
+                        r << "dual null test (flip B): outRMS=" << juce::String (nullRms, 6)
+                          << " cancels: " << (nullRms < 0.002f ? "PASS" : "FAIL") << "\n";
+
+                        // Dual state roundtrip through the blob.
+                        amp->sideTrimDbB = -3.5f;
+                        juce::MemoryBlock blob;
+                        amp->getStateInformation (blob);
+                        amp->dualMode = false;
+                        amp->polarityFlipB = false;
+                        amp->sideTrimDbB = 0.0f;
+                        amp->setStateInformation (blob.getData(), (int) blob.getSize());
+                        const bool stateOk = amp->dualMode.load() && amp->polarityFlipB.load()
+                                             && std::abs (amp->sideTrimDbB.load() + 3.5f) < 0.01f
+                                             && amp->getRigId (1).isNotEmpty();
+                        r << "dual state roundtrip: " << (stateOk ? "PASS" : "FAIL") << "\n";
+
+                        scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
+                    };
+                    (*dualCheck) (0);
+                    return;   // final report written by dualCheck
                 }
 
                 scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
