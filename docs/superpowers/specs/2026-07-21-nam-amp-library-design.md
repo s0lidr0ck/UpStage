@@ -84,6 +84,26 @@ Each amp row can switch between **Single** and **Dual**:
 - Round-trip test: save/load a project with single and dual amp rows restores rigs, cabs, knobs, and blend state.
 - Stress: rapid rig swaps while audio runs (background load + atomic swap holds up); project switch with amp module windows open (lifetime rule holds up).
 
+## Implementation deviations (as built, 2026-07-21)
+
+- **Pictures:** attach via file browse or drag-drop onto the picture well; no
+  clipboard paste (JUCE's clipboard is text-only on Windows).
+- **Sample-rate mismatch:** shown as a "48k!" legend on the amp faceplate; no
+  resampling in v1. Run the device at the capture's rate (48k for Tone3000).
+- **Missing rig at load:** the amp row stays in the chain and passes audio
+  through cleanly; the editor shows a MISSING legend. The row is not
+  force-bypassed (equivalent audible result, simpler state).
+- **Full/Lite:** implemented via NAM Core's `SlimmableModel::SetSlimmableSize`
+  (upstream API existed in v0.5.4); LITE button on the faceplate.
+- **Amp rows** are available on the four channel strips and the input channel;
+  not on the FX bus.
+- **Vendored patch:** `Dependencies/nlohmann/json.hpp` defines a throwing
+  `JSON_ASSERT` so malformed model files fail as catchable exceptions instead
+  of UB / a blocked loader thread (verified against a hand-crafted bad file).
+- **A2 gate ground truth:** a real Tone3000 A2 download ("Fender Vibroverb
+  1964") is file version 0.7.0, architecture `SlimmableContainer` - the
+  version >= 0.7 predicate is confirmed correct.
+
 ## Licensing notes
 
 - NeuralAmpModelerCore, the A2 architecture, and training code are MIT — free to embed and ship.

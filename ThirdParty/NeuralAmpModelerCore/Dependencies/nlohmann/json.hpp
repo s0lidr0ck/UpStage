@@ -18,6 +18,21 @@
 #ifndef INCLUDE_NLOHMANN_JSON_HPP_
 #define INCLUDE_NLOHMANN_JSON_HPP_
 
+// UpStage patch: NAM model files are untrusted user downloads. nlohmann's
+// default JSON_ASSERT is assert(), which on a malformed model either blocks a
+// background loader thread behind a CRT dialog (debug) or is plain UB
+// (release). Throwing instead routes every malformed-model code path into the
+// loader's existing try/catch so a bad file fails gracefully.
+#ifndef JSON_ASSERT
+  #include <stdexcept>
+  #define JSON_ASSERT(x)                                                        \
+    do                                                                          \
+    {                                                                           \
+      if (!(x))                                                                 \
+        throw std::invalid_argument ("Malformed NAM model data (" #x ")");      \
+    } while (false)
+#endif
+
 #include <algorithm> // all_of, find, for_each
 #include <cstddef> // nullptr_t, ptrdiff_t, size_t
 #include <functional> // hash, less

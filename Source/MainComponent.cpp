@@ -1,4 +1,4 @@
-#include "MainComponent.h"
+﻿#include "MainComponent.h"
 #include "MixerLookAndFeel.h"
 #include "NamAmpProcessor.h"
 #include "AmpImportDialog.h"
@@ -17,173 +17,6 @@ static juce::String panText (double v)
 //==============================================================================
 MainComponent::MainComponent() : menuBar (this)
 {
-#if JUCE_DEBUG
-    // TEMP (Task 1 verification): amp-library self-test, removed once a real A2
-    // capture has confirmed the version predicate.
-    {
-        juce::String report;
-        auto scratch = juce::File (R"(C:\Users\alex\AppData\Local\Temp\claude\C--projects-A18-UpStage\81cf921b-2c4c-41a0-9cc5-8cd02c1222d3\scratchpad)");
-        juce::String err;
-        const bool a1Accepted = AmpLibrary::isA2NamFile (scratch.getChildFile ("fake_a1.nam"), err);
-        report << "A1 reject test: " << (a1Accepted ? "FAIL (accepted!)" : "PASS - " + err) << "\n";
-        err.clear();
-        const bool a2Accepted = AmpLibrary::isA2NamFile (scratch.getChildFile ("fake_a2.nam"), err);
-        report << "A2 accept test: " << (a2Accepted ? "PASS" : "FAIL - " + err) << "\n";
-        AmpLibrary::instance().rescan();
-        report << "Library root: " << AmpLibrary::instance().getRootFolder().getFullPathName() << "\n";
-        report << "Entries: " << AmpLibrary::instance().getEntries().size() << "\n";
-        scratch.getChildFile ("amp_library_selftest.txt").replaceWithText (report);
-
-        // TEMP (engine verification with a real A2 capture): imports the
-        // Vibroverb file once, loads it in a standalone processor (not in any
-        // chain, so it can't race the audio thread), and pushes audio through.
-        // Removed in the hardening task.
-        juce::MessageManager::callAsync ([scratch]
-        {
-            auto& lib = AmpLibrary::instance();
-
-            // Import the real capture once; find it on later runs by name.
-            juce::String rigId;
-            for (const auto* e : lib.getEntries())
-                if (e->kind == AmpLibraryEntry::Kind::rig && e->name.contains ("Vibroverb"))
-                    rigId = e->id;
-
-            juce::String importErr;
-            if (rigId.isEmpty())
-            {
-                auto src = scratch.getChildFile ("vibroverb")
-                                  .findChildFiles (juce::File::findFiles, false, "*.nam");
-                if (! src.isEmpty())
-                    rigId = lib.importNamFile (src.getReference (0), "Fender Vibroverb 1964",
-                                               juce::File(), juce::StringArray { "fender", "clean" },
-                                               false, juce::File(), importErr);
-            }
-
-            juce::String r;
-            r << "import: " << (rigId.isNotEmpty() ? "OK id=" + rigId : "FAILED - " + importErr) << "\n";
-            if (rigId.isEmpty())
-            {
-                scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
-                return;
-            }
-
-            auto amp = std::make_shared<NamAmpProcessor>();
-            amp->prepareToPlay (48000.0, 512);
-            amp->loadRig (0, rigId);
-
-            // Poll for the async model load, then run the processing checks.
-            auto check = std::make_shared<std::function<void (int)>>();
-            *check = [amp, scratch, r, check] (int attempts) mutable
-            {
-                if (! amp->hasModel (0) && ! amp->didModelFail (0) && attempts < 30)
-                {
-                    juce::Timer::callAfterDelay (500, [check, attempts] { (*check) (attempts + 1); });
-                    return;
-                }
-
-                r << "model live: " << (amp->hasModel (0) ? "yes" : "no")
-                  << "  failed: " << (amp->didModelFail (0) ? "yes" : "no")
-                  << "  slimmable: " << (amp->isModelSlimmable (0) ? "yes" : "no")
-                  << "  srMismatch: " << (amp->hasSampleRateMismatch (0) ? "yes" : "no") << "\n";
-                if (amp->didModelFail (0))
-                    r << "load error: " << amp->getLastLoadError (0) << "\n";
-
-                if (amp->hasModel (0))
-                {
-                    auto runBlock = [amp]
-                    {
-                        juce::AudioBuffer<float> buf (2, 512);
-                        for (int i = 0; i < 512; ++i)
-                        {
-                            const float v = 0.1f * std::sin (2.0f * juce::MathConstants<float>::pi
-                                                             * 220.0f * (float) i / 48000.0f);
-                            buf.setSample (0, i, v);
-                            buf.setSample (1, i, v);
-                        }
-                        juce::MidiBuffer midi;
-                        // settle then measure
-                        for (int b = 0; b < 4; ++b)
-                        {
-                            juce::AudioBuffer<float> work (2, 512);
-                            work.makeCopyOf (buf);
-                            amp->processBlock (work, midi);
-                            if (b == 3)
-                                return std::make_pair (work.getRMSLevel (0, 0, 512),
-                                                       buf.getRMSLevel (0, 0, 512));
-                        }
-                        return std::make_pair (0.0f, 0.0f);
-                    };
-
-                    auto [outRms, inRms] = runBlock();
-                    r << "full: inRMS=" << juce::String (inRms, 5)
-                      << " outRMS=" << juce::String (outRms, 5)
-                      << " processed: " << (std::abs (outRms - inRms) > 0.0005f ? "PASS" : "FAIL (passthrough?)") << "\n";
-
-                    if (amp->isModelSlimmable (0))
-                    {
-                        amp->setUseLite (true);
-                        auto [liteRms, inRms2] = runBlock();
-                        juce::ignoreUnused (inRms2);
-                        r << "lite: outRMS=" << juce::String (liteRms, 5)
-                          << " nonSilent: " << (liteRms > 0.0001f ? "PASS" : "FAIL") << "\n";
-                        amp->setUseLite (false);
-                    }
-
-                    // Dual mode: same rig on side B; with polarity flip and a
-                    // centered blend the parallel paths must null (proves the
-                    // two sides stay sample-aligned).
-                    const auto rigIdA = amp->getRigId (0);
-                    amp->loadRig (1, rigIdA);
-                    auto dualCheck = std::make_shared<std::function<void (int)>>();
-                    *dualCheck = [amp, scratch, r, runBlock, dualCheck] (int tries) mutable
-                    {
-                        if (! amp->hasModel (1) && ! amp->didModelFail (1) && tries < 30)
-                        {
-                            juce::Timer::callAfterDelay (500, [dualCheck, tries] { (*dualCheck) (tries + 1); });
-                            return;
-                        }
-
-                        amp->dualMode = true;
-                        amp->blend = 0.5f;
-                        amp->panA = 0.0f;
-                        amp->panB = 0.0f;
-
-                        auto [dualRms, in1] = runBlock();
-                        r << "dual (A+B same rig): outRMS=" << juce::String (dualRms, 5)
-                          << " nonSilent: " << (dualRms > 0.0001f ? "PASS" : "FAIL") << "\n";
-
-                        amp->polarityFlipB = true;
-                        auto [nullRms, in2] = runBlock();
-                        juce::ignoreUnused (in1, in2);
-                        r << "dual null test (flip B): outRMS=" << juce::String (nullRms, 6)
-                          << " cancels: " << (nullRms < 0.002f ? "PASS" : "FAIL") << "\n";
-
-                        // Dual state roundtrip through the blob.
-                        amp->sideTrimDbB = -3.5f;
-                        juce::MemoryBlock blob;
-                        amp->getStateInformation (blob);
-                        amp->dualMode = false;
-                        amp->polarityFlipB = false;
-                        amp->sideTrimDbB = 0.0f;
-                        amp->setStateInformation (blob.getData(), (int) blob.getSize());
-                        const bool stateOk = amp->dualMode.load() && amp->polarityFlipB.load()
-                                             && std::abs (amp->sideTrimDbB.load() + 3.5f) < 0.01f
-                                             && amp->getRigId (1).isNotEmpty();
-                        r << "dual state roundtrip: " << (stateOk ? "PASS" : "FAIL") << "\n";
-
-                        scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
-                    };
-                    (*dualCheck) (0);
-                    return;   // final report written by dualCheck
-                }
-
-                scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
-            };
-            (*check) (0);
-        });
-    }
-#endif
-
     pluginFormatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
 
     DBG ("Plugin formats registered: " + juce::String (pluginFormatManager.getNumFormats()));
@@ -371,7 +204,7 @@ MainComponent::MainComponent() : menuBar (this)
     // Right-click MIDI Learn is handled in MainComponent::mouseDown
     addAndMakeVisible (loopVolumeSlider);
 
-    // Input trim slider (-24 dB … +24 dB)
+    // Input trim slider (-24 dB â€¦ +24 dB)
     inputTrimSlider.setRange (-24.0, 24.0, 0.1);
     inputTrimSlider.setValue (0.0, juce::dontSendNotification);
     inputTrimSlider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -709,7 +542,7 @@ MainComponent::MainComponent() : menuBar (this)
     inputDirectKnob.onDragEnd = [this] { hideKnobReadout(); };
     addAndMakeVisible (inputDirectKnob);
 
-    // Shared floating value readout (#2) — created hidden, shown on knob turn.
+    // Shared floating value readout (#2) â€” created hidden, shown on knob turn.
     knobReadout = std::make_unique<juce::Label>();
     knobReadout->setJustificationType (juce::Justification::centred);
     knobReadout->setColour (juce::Label::backgroundColourId, juce::Colour (0xee101010));
@@ -1087,7 +920,7 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         return;
     if (info.numSamples > work.getNumSamples())
     {
-        // Larger than prepared — last-resort grow (rare; avoids OOB writes).
+        // Larger than prepared â€” last-resort grow (rare; avoids OOB writes).
         work        .setSize (2, info.numSamples, false, true, false);
         masterMix   .setSize (2, info.numSamples, false, true, false);
         directSignal.setSize (2, info.numSamples, false, true, false);
@@ -1458,7 +1291,7 @@ void MainComponent::paint (juce::Graphics& g)
         g.reduceClipRegion (getLocalBounds());
         juce::Random rng (1977);
 
-        // Soft mottled stains — warm (oxidation) and cool (grime) blotches.
+        // Soft mottled stains â€” warm (oxidation) and cool (grime) blotches.
         for (int i = 0; i < 70; ++i)
         {
             float bx = rng.nextFloat() * w;
@@ -1487,7 +1320,7 @@ void MainComponent::paint (juce::Graphics& g)
             g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
         }
 
-        // Fine scratches — faint diagonal hairlines.
+        // Fine scratches â€” faint diagonal hairlines.
         for (int i = 0; i < 40; ++i)
         {
             float sx = rng.nextFloat() * w;
@@ -1535,7 +1368,7 @@ void MainComponent::paint (juce::Graphics& g)
     };
     drawGroove (28);
 
-    // Draws a raised drop-in module face within a dark seam — the chassis unit
+    // Draws a raised drop-in module face within a dark seam â€” the chassis unit
     // look shared by the toolbar and scene rows.
     auto drawDropInModule = [&g, w] (juce::Rectangle<float> band)
     {
@@ -1946,7 +1779,7 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // Right-click any other registered learnable control → Learn / Clear MIDI (#6).
+    // Right-click any other registered learnable control â†’ Learn / Clear MIDI (#6).
     if (e.mods.isRightButtonDown())
     {
         const juce::String pid = paramIdForComponent (e.eventComponent);
@@ -1966,7 +1799,7 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // Click on MIDI LED — toggle MIDI monitor window
+    // Click on MIDI LED â€” toggle MIDI monitor window
     if (e.eventComponent == &midiLedLabel)
     {
         if (midiMonitorWindow == nullptr)
@@ -2116,7 +1949,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    // Ctrl+Z = Undo (disabled — only fader drags are undoable, incomplete)
+    // Ctrl+Z = Undo (disabled â€” only fader drags are undoable, incomplete)
     // TODO: expand undo to cover all mutations before re-enabling
 
     // 1-4 = Switch channel (main keyboard)
@@ -2243,7 +2076,7 @@ void MainComponent::resized()
     if (songBar)
         songBar->setBounds (area.removeFromTop (34));
 
-    // Transport row — sits inside the drop-in module painted at y=64..102.
+    // Transport row â€” sits inside the drop-in module painted at y=64..102.
     auto transport = area.removeFromTop (48);
     transport.reduce (12, 8);   // keep buttons within the module face
 
@@ -2286,7 +2119,7 @@ void MainComponent::resized()
     transport.removeFromRight (3);
     midiLedLabel.setBounds (transport.removeFromRight (32).reduced (0, 6));
 
-    // Scenes row — a recessed panel band with side gutters (for end screws)
+    // Scenes row â€” a recessed panel band with side gutters (for end screws)
     // and even top/bottom padding so the buttons sit centred. Panel + screws
     // are drawn in paint() using these same insets.
     auto sceneBand = area.removeFromTop (28);            // reserves y=110..138
@@ -2545,7 +2378,7 @@ void MainComponent::buttonClicked (juce::Button* b)
     // Gate toggle
     else if (b == &gateToggle) { noiseGate.enabled = gateToggle.getToggleState(); }
 
-    // Record — opens the Reel Recorder window (capture mode, folder, REC/STOP inside).
+    // Record â€” opens the Reel Recorder window (capture mode, folder, REC/STOP inside).
     else if (b == &recordButton)
     {
         if (reelRecorderWindow == nullptr)
@@ -2559,7 +2392,7 @@ void MainComponent::buttonClicked (juce::Button* b)
         reelRecorderWindow->toggleVisible();
     }
 
-    // Metronome — opens the Metronome window (START/STOP + all settings inside).
+    // Metronome â€” opens the Metronome window (START/STOP + all settings inside).
     else if (b == &metronomeButton)
     {
         if (metronomeWindow == nullptr)
@@ -2568,7 +2401,7 @@ void MainComponent::buttonClicked (juce::Button* b)
         metronomeWindow->toggleVisible();
     }
 
-    // Looper — opens the Loop Station window (discrete Rec/Overdub/Play/Clear).
+    // Looper â€” opens the Loop Station window (discrete Rec/Overdub/Play/Clear).
     else if (b == &loopRecButton)
     {
         if (loopStationWindow == nullptr)
@@ -3452,7 +3285,7 @@ void MainComponent::loadSongState (const ProjectData& data)
         channels[c]->setOutputGain (0.0f);
     sceneMuteActive = true;
 
-    // Restore channel states (faders, bypass, plugin parameters) — no plugin reload
+    // Restore channel states (faders, bypass, plugin parameters) â€” no plugin reload
     for (int c = 0; c < NUM_CHANNELS; ++c)
         channels[c]->setState (data.channels[c]);
 
@@ -4515,7 +4348,7 @@ void MainComponent::updateActiveIndicators()
         bool isActive = (i == activeChannel);
         bool isMuted  = channelMuted[i];
 
-        // Text colour only — the LCD backing (background) is drawn in paint()
+        // Text colour only â€” the LCD backing (background) is drawn in paint()
         // so it can render recessed scanlines. Outline stays transparent.
         channelLabels[i].setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
         if (isMuted)
