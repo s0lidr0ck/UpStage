@@ -27,6 +27,12 @@
 #include "MidiRulesPanel.h"
 #include "SongBar.h"
 #include "LoadingOverlay.h"
+#include "AmpLibrary.h"
+#include "CassetteDeckWindow.h"
+#include "LoopStationWindow.h"
+#include "MetronomeWindow.h"
+#include "ReelRecorderWindow.h"
+#include "AmpLibraryBrowserWindow.h"
 
 /**
  * MainComponent  v0.4 - Mixer-Style Layout
@@ -57,11 +63,17 @@ class MainComponent : public juce::AudioAppComponent,
                       public juce::MenuBarModel,
                       public MidiLearnManager::Listener,
                       public juce::DragAndDropContainer,
-                      public juce::DragAndDropTarget
+                      public juce::DragAndDropTarget,
+                      public juce::FileDragAndDropTarget
 {
 public:
     MainComponent();
     ~MainComponent() override;
+
+    //==========================================================================
+    // OS file drag-drop: .nam captures and IR wavs import into the amp library.
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
     //==========================================================================
     // AudioAppComponent
@@ -253,7 +265,6 @@ private:
 
     // Metronome
     juce::TextButton  metronomeButton  { "Metro" };
-    int               metroFlashCounter = 0;
 
     // Looper
     juce::TextButton  loopRecButton    { "Loop" };
@@ -333,6 +344,15 @@ private:
 
     // Tuner panel (hidden until activated)
     TunerPanel tunerPanel;
+
+    // Hardware module windows opened from toolbar icons
+    std::unique_ptr<CassetteDeckWindow> cassetteDeckWindow;
+    std::unique_ptr<LoopStationWindow>  loopStationWindow;
+    std::unique_ptr<MetronomeWindow>    metronomeWindow;
+    std::unique_ptr<ReelRecorderWindow> reelRecorderWindow;
+    std::unique_ptr<AmpLibraryBrowserWindow> ampBrowserWindow;
+    juce::TextButton ampsButton { "AMPS" };
+    AmpLibraryBrowserWindow& ensureAmpBrowser();
 
     // MIDI activity LED + monitor
     juce::Label midiLedLabel;
@@ -423,7 +443,6 @@ private:
     };
 
     void showPluginManager();
-    void showMetronomeSettings();
     void showShortcutHelp();
     void showMidiRulesEditor();
     void autosave();

@@ -24,6 +24,7 @@ public:
     int getPreferredHeight() const;
 
     std::function<void()> onAddPluginClicked;
+    std::function<void()> onAddAmpClicked;
     std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed)> onPastePlugin;
 
     juce::Array<PluginAppearanceState> getAppearances() const;

@@ -33,6 +33,11 @@ public:
     bool addPlugin (const juce::PluginDescription& desc,
                     std::function<void(bool success)> callback);
 
+    /** Append an internal NAM amp row. Appends via the message queue (same
+        FIFO the async VST3 loads use) so chain order is preserved when
+        projects restore mixed VST3/amp chains. */
+    void addAmp (std::function<void(bool success)> callback = nullptr);
+
     /** Remove plugin at position in chain. */
     void removePlugin (int chainIndex);
 
