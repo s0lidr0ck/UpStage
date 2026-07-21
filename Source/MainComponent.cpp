@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "MixerLookAndFeel.h"
 #include "NamAmpProcessor.h"
+#include "AmpImportDialog.h"
 #include <windows.h>
 #include <psapi.h>
 
@@ -2384,13 +2385,46 @@ AmpLibraryBrowserWindow& MainComponent::ensureAmpBrowser()
     if (ampBrowserWindow == nullptr)
     {
         ampBrowserWindow = std::make_unique<AmpLibraryBrowserWindow>();
-        ampBrowserWindow->getContent().onImportRequested = [this] (juce::File f)
+        ampBrowserWindow->getContent().onImportRequested = [] (juce::File f)
         {
-            // Import dialog lands in the import-flow task; log until then.
-            juce::Logger::writeToLog ("Amp import requested: " + f.getFullPathName());
+            AmpImportDialog::show (f);
         };
     }
     return *ampBrowserWindow;
+}
+
+//==============================================================================
+// OS file drag-drop -> amp library import (one dialog per file, chained).
+bool MainComponent::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+        if (f.endsWithIgnoreCase (".nam") || f.endsWithIgnoreCase (".wav"))
+            return true;
+    return false;
+}
+
+static void importAmpFileQueue (juce::Array<juce::File> files, int index)
+{
+    if (index >= files.size())
+        return;
+    AmpImportDialog::show (files[index], [files, index]
+    {
+        juce::MessageManager::callAsync ([files, index]
+        {
+            importAmpFileQueue (files, index + 1);
+        });
+    });
+}
+
+void MainComponent::filesDropped (const juce::StringArray& files, int, int)
+{
+    juce::Array<juce::File> matching;
+    for (const auto& f : files)
+        if (f.endsWithIgnoreCase (".nam") || f.endsWithIgnoreCase (".wav"))
+            matching.add (juce::File (f));
+
+    if (! matching.isEmpty())
+        importAmpFileQueue (matching, 0);
 }
 
 //==============================================================================

@@ -63,11 +63,17 @@ class MainComponent : public juce::AudioAppComponent,
                       public juce::MenuBarModel,
                       public MidiLearnManager::Listener,
                       public juce::DragAndDropContainer,
-                      public juce::DragAndDropTarget
+                      public juce::DragAndDropTarget,
+                      public juce::FileDragAndDropTarget
 {
 public:
     MainComponent();
     ~MainComponent() override;
+
+    //==========================================================================
+    // OS file drag-drop: .nam captures and IR wavs import into the amp library.
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
     //==========================================================================
     // AudioAppComponent
