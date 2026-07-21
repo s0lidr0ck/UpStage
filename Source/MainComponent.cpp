@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "MixerLookAndFeel.h"
+#include "NamAmpProcessor.h"
 #include <windows.h>
 #include <psapi.h>
 
@@ -31,6 +32,43 @@ MainComponent::MainComponent() : menuBar (this)
         report << "Library root: " << AmpLibrary::instance().getRootFolder().getFullPathName() << "\n";
         report << "Entries: " << AmpLibrary::instance().getEntries().size() << "\n";
         scratch.getChildFile ("amp_library_selftest.txt").replaceWithText (report);
+
+        // TEMP (Task 3 verification): amp chain-row + serialization roundtrip.
+        // Runs after construction completes; removed in Task 8.
+        juce::MessageManager::callAsync ([this, scratch]
+        {
+            channels[0]->addAmp ([this, scratch] (bool ok)
+            {
+                juce::String r;
+                r << "addAmp ok: " << (ok ? "yes" : "no") << "\n";
+                r << "numPlugins: " << channels[0]->getNumPlugins() << "\n";
+                if (auto* proc = channels[0]->getPlugin (0))
+                    r << "row name: " << proc->getName() << "\n";
+
+                auto st = channels[0]->getState();
+                r << "saved slots: " << st.plugins.size() << "\n";
+                if (st.plugins.size() > 0)
+                {
+                    r << "slot identifier: " << st.plugins.getReference (0).pluginIdentifier << "\n";
+                    r << "state bytes: " << (int) st.plugins.getReference (0).stateData.getSize() << "\n";
+                }
+
+                // knob roundtrip through the state blob
+                if (auto* amp = dynamic_cast<NamAmpProcessor*> (channels[0]->getPlugin (0)))
+                {
+                    amp->bassKnob = 7.5f;
+                    juce::MemoryBlock blob;
+                    amp->getStateInformation (blob);
+                    amp->bassKnob = 5.0f;
+                    amp->setStateInformation (blob.getData(), (int) blob.getSize());
+                    r << "knob roundtrip: " << (std::abs (amp->bassKnob.load() - 7.5f) < 0.01f ? "PASS" : "FAIL") << "\n";
+                }
+
+                channels[0]->removePlugin (0);   // leave the app clean
+                r << "removed, numPlugins now: " << channels[0]->getNumPlugins() << "\n";
+                scratch.getChildFile ("amp_chain_selftest.txt").replaceWithText (r);
+            });
+        });
     }
 #endif
 
@@ -403,6 +441,13 @@ MainComponent::MainComponent() : menuBar (this)
         // Plugin chain panel
         channelStripPanels[i] = std::make_unique<ChannelStripPanel> (*channels[i]);
         channelStripPanels[i]->onAddPluginClicked = [this, i] { showAddPluginMenu (i); };
+        channelStripPanels[i]->onAddAmpClicked = [this, i]
+        {
+            channels[i]->addAmp ([this, i] (bool)
+            {
+                channelStripPanels[i]->refresh();
+            });
+        };
         channelStripPanels[i]->onPastePlugin = [this, i] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
         {
             if (auto found = knownPluginList.getTypeForIdentifierString (id))
@@ -479,6 +524,13 @@ MainComponent::MainComponent() : menuBar (this)
 
     inputChannelPanel = std::make_unique<ChannelStripPanel> (*inputChannel);
     inputChannelPanel->onAddPluginClicked = [this] { showAddPluginMenu (-1); };
+    inputChannelPanel->onAddAmpClicked = [this]
+    {
+        inputChannel->addAmp ([this] (bool)
+        {
+            inputChannelPanel->refresh();
+        });
+    };
     inputChannelPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
     {
         if (auto found = knownPluginList.getTypeForIdentifierString (id))
@@ -3057,6 +3109,31 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         for (int slotIndex = 0; slotIndex < data.channels[i].plugins.size(); ++slotIndex)
         {
             const auto& slot = data.channels[i].plugins.getReference (slotIndex);
+
+            if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier)
+            {
+                juce::MemoryBlock ampBlob = slot.stateData;
+                bool ampBypassed = slot.isBypassed;
+                int ampChan = i, ampSlot = slotIndex;
+
+                channels[i]->addAmp ([this, ampChan, ampSlot, ampBlob, ampBypassed] (bool ok)
+                {
+                    if (ok)
+                    {
+                        if (ampBlob.getSize() > 0)
+                            if (auto* proc = channels[ampChan]->getPlugin (ampSlot))
+                                proc->setStateInformation (ampBlob.getData(), (int) ampBlob.getSize());
+                        channels[ampChan]->setPluginBypassed (ampSlot, ampBypassed);
+                    }
+                    juce::MessageManager::callAsync ([this, ampChan] {
+                        channelStripPanels[ampChan]->refresh();
+                        if (--pendingPluginLoads <= 0)
+                            loadingOverlay.dismiss();
+                    });
+                });
+                continue;
+            }
+
             juce::PluginDescription desc;
             if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
                 desc = *found;
@@ -3094,6 +3171,31 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
     for (int slotIndex = 0; slotIndex < data.inputChannelState.plugins.size(); ++slotIndex)
     {
         const auto& slot = data.inputChannelState.plugins.getReference (slotIndex);
+
+        if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier)
+        {
+            juce::MemoryBlock ampBlob = slot.stateData;
+            bool ampBypassed = slot.isBypassed;
+            int ampSlot = slotIndex;
+
+            inputChannel->addAmp ([this, ampSlot, ampBlob, ampBypassed] (bool ok)
+            {
+                if (ok)
+                {
+                    if (ampBlob.getSize() > 0)
+                        if (auto* proc = inputChannel->getPlugin (ampSlot))
+                            proc->setStateInformation (ampBlob.getData(), (int) ampBlob.getSize());
+                    inputChannel->setPluginBypassed (ampSlot, ampBypassed);
+                }
+                juce::MessageManager::callAsync ([this] {
+                    inputChannelPanel->refresh();
+                    if (--pendingPluginLoads <= 0)
+                        loadingOverlay.dismiss();
+                });
+            });
+            continue;
+        }
+
         juce::PluginDescription desc;
         if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
             desc = *found;

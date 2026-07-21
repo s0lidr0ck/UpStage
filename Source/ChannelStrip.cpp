@@ -1,4 +1,5 @@
 #include "ChannelStrip.h"
+#include "NamAmpProcessor.h"
 
 ChannelStrip::ChannelStrip (int index, juce::AudioPluginFormatManager& fm)
     : channelIndex (index), formatManager (fm)
@@ -109,6 +110,35 @@ bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
             if (callback) callback (true);
         });
     return true;
+}
+
+void ChannelStrip::addAmp (std::function<void(bool)> callback)
+{
+    juce::MessageManager::callAsync ([this, callback]
+    {
+        auto amp = std::make_unique<NamAmpProcessor>();
+
+        if (currentSampleRate > 0)
+        {
+            amp->setRateAndBufferSizeDetails (currentSampleRate, currentBlockSize);
+            amp->prepareToPlay (currentSampleRate, currentBlockSize);
+        }
+
+        if (playHead != nullptr)
+            amp->setPlayHead (playHead);
+
+        auto* entry = new PluginEntry();
+        entry->processor  = std::move (amp);
+        entry->identifier = NamAmpProcessor::kIdentifier;
+        entry->bypassed   = false;
+
+        {
+            juce::ScopedLock sl (chainLock);
+            pluginChain.add (entry);
+        }
+
+        if (callback) callback (true);
+    });
 }
 
 void ChannelStrip::removePlugin (int chainIndex)
