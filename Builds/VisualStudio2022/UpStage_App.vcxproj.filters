@@ -778,6 +778,9 @@
     <ClCompile Include="..\..\Source\AmpLibrary.cpp">
       <Filter>UpStage\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\NamAmpProcessor.cpp">
+      <Filter>UpStage\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\activations.cpp">
       <Filter>UpStage\ThirdParty-NAM</Filter>
     </ClCompile>
@@ -3961,6 +3964,9 @@
       <Filter>UpStage\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\AmpLibrary.h">
+      <Filter>UpStage\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\NamAmpProcessor.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h">

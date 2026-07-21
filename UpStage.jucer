@@ -125,6 +125,10 @@
             file="Source/AmpLibrary.h"/>
       <FILE id="AmpLibraryCpp" name="AmpLibrary.cpp" compile="1" resource="0"
             file="Source/AmpLibrary.cpp"/>
+      <FILE id="NamAmpProcH" name="NamAmpProcessor.h" compile="0" resource="0"
+            file="Source/NamAmpProcessor.h"/>
+      <FILE id="NamAmpProcCpp" name="NamAmpProcessor.cpp" compile="1" resource="0"
+            file="Source/NamAmpProcessor.cpp"/>
     </GROUP>
     <GROUP id="ThirdPartyNAM" name="ThirdParty-NAM">
       <FILE id="NamActCpp" name="activations.cpp" compile="1" resource="0"
@@ -166,7 +170,8 @@
   </MODULES>
   <EXPORTFORMATS>
     <VS2022 targetFolder="Builds/VisualStudio2022" extraSearchPaths="$(JUCE_PATH)&#10;$(JUCE_PATH)/modules/juce_audio_processors/format_types/VST3_SDK&#10;C:\VST_SDK\vst3sdk&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen&#10;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann"
-            vst3Path="C:\VST_SDK\vst3sdk" toolset="v143" cppLanguageStandard="17">
+            vst3Path="C:\VST_SDK\vst3sdk" toolset="v143" cppLanguageStandard="17"
+            extraDefs="NAM_SAMPLE_FLOAT=1&#10;NAM_ENABLE_A2_FAST=1">
       <CONFIGURATIONS>
         <CONFIGURATION name="Debug" isDebug="1" optimisation="1" targetName="UpStage"
                        preprocessorDefs="JUCE_PLUGINHOST_VST3=1&#10;NAM_SAMPLE_FLOAT=1&#10;NAM_ENABLE_A2_FAST=1"

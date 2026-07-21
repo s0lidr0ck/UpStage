@@ -68,7 +68,7 @@
       <Optimization>Disabled</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>C:\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK;C:\JUCE\vst3sdk-master;..\..\JuceLibraryCode;C:\JUCE\modules;C:\VST_SDK\vst3sdk;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;DEBUG;_DEBUG;JUCE_PLUGINHOST_VST3=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;DEBUG;_DEBUG;JUCE_PLUGINHOST_VST3=1;NAM_SAMPLE_FLOAT=1;NAM_ENABLE_A2_FAST=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -82,7 +82,7 @@
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>C:\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK;C:\JUCE\vst3sdk-master;..\..\JuceLibraryCode;C:\JUCE\modules;C:\VST_SDK\vst3sdk;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;DEBUG;_DEBUG;JUCE_PLUGINHOST_VST3=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;DEBUG;_DEBUG;JUCE_PLUGINHOST_VST3=1;NAM_SAMPLE_FLOAT=1;NAM_ENABLE_A2_FAST=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <OutputFile>$(OutDir)\UpStage.exe</OutputFile>
@@ -111,7 +111,7 @@
       <Optimization>Full</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>C:\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK;C:\JUCE\vst3sdk-master;..\..\JuceLibraryCode;C:\JUCE\modules;C:\VST_SDK\vst3sdk;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;JUCE_PLUGINHOST_VST3=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;JUCE_PLUGINHOST_VST3=1;NAM_SAMPLE_FLOAT=1;NAM_ENABLE_A2_FAST=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -125,7 +125,7 @@
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>C:\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK;C:\JUCE\vst3sdk-master;..\..\JuceLibraryCode;C:\JUCE\modules;C:\VST_SDK\vst3sdk;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\NAM;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\eigen;C:\projects\A18\UpStage\ThirdParty\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;JUCE_PLUGINHOST_VST3=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;JUCE_PLUGINHOST_VST3=1;NAM_SAMPLE_FLOAT=1;NAM_ENABLE_A2_FAST=1;JUCER_VS2022_78A503E=1;JUCE_APP_VERSION=0.4.0;JUCE_APP_VERSION_HEX=0x400;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <OutputFile>$(OutDir)\UpStage.exe</OutputFile>
@@ -174,6 +174,7 @@
     </ClCompile>
     <ClCompile Include="..\..\Source\SongBar.cpp"/>
     <ClCompile Include="..\..\Source\AmpLibrary.cpp"/>
+    <ClCompile Include="..\..\Source\NamAmpProcessor.cpp"/>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\activations.cpp"/>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\container.cpp"/>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\conv1d.cpp"/>
@@ -3074,6 +3075,7 @@
     <ClInclude Include="..\..\Source\UndoActions.h"/>
     <ClInclude Include="..\..\Source\VuMeter.h"/>
     <ClInclude Include="..\..\Source\AmpLibrary.h"/>
+    <ClInclude Include="..\..\Source\NamAmpProcessor.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\buffers\juce_AudioChannelSet.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\buffers\juce_AudioDataConverters.h"/>
