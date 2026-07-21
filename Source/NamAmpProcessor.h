@@ -46,6 +46,7 @@ public:
     bool didModelFail (int side) const       { return sides[juce::jlimit (0, 1, side)].failed.load(); }
     bool hasSampleRateMismatch (int side) const { return sides[juce::jlimit (0, 1, side)].srMismatch.load(); }
     bool isModelSlimmable (int side) const   { return sides[juce::jlimit (0, 1, side)].slimmable.load(); }
+    juce::String getLastLoadError (int side) const { return sides[juce::jlimit (0, 1, side)].lastLoadError; }
 
     //==========================================================================
     // Parameters. Audio thread reads; message thread (editor) writes.
@@ -125,6 +126,7 @@ private:
         std::atomic<bool> failed     { false };
         std::atomic<bool> srMismatch { false };
         std::atomic<bool> slimmable  { false };
+        juce::String lastLoadError;         // message thread only
 
         juce::dsp::Convolution cab;         // has its own RT-safe background loader
         std::atomic<bool> cabLoaded { false };

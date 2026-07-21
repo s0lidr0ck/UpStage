@@ -131,6 +131,8 @@
             file="Source/NamAmpProcessor.cpp"/>
       <FILE id="NamAmpEditorH" name="NamAmpEditor.h" compile="0" resource="0"
             file="Source/NamAmpEditor.h"/>
+      <FILE id="AmpBrowserWinH" name="AmpLibraryBrowserWindow.h" compile="0"
+            resource="0" file="Source/AmpLibraryBrowserWindow.h"/>
     </GROUP>
     <GROUP id="ThirdPartyNAM" name="ThirdParty-NAM">
       <FILE id="NamActCpp" name="activations.cpp" compile="1" resource="0"

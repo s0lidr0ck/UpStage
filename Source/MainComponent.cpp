@@ -33,47 +33,105 @@ MainComponent::MainComponent() : menuBar (this)
         report << "Entries: " << AmpLibrary::instance().getEntries().size() << "\n";
         scratch.getChildFile ("amp_library_selftest.txt").replaceWithText (report);
 
-        // TEMP (Task 3 verification): amp chain-row + serialization roundtrip.
-        // Runs after construction completes; removed in Task 8.
-        juce::MessageManager::callAsync ([this, scratch]
+        // TEMP (engine verification with a real A2 capture): imports the
+        // Vibroverb file once, loads it in a standalone processor (not in any
+        // chain, so it can't race the audio thread), and pushes audio through.
+        // Removed in the hardening task.
+        juce::MessageManager::callAsync ([scratch]
         {
-            channels[0]->addAmp ([this, scratch] (bool ok)
+            auto& lib = AmpLibrary::instance();
+
+            // Import the real capture once; find it on later runs by name.
+            juce::String rigId;
+            for (const auto* e : lib.getEntries())
+                if (e->kind == AmpLibraryEntry::Kind::rig && e->name.contains ("Vibroverb"))
+                    rigId = e->id;
+
+            juce::String importErr;
+            if (rigId.isEmpty())
             {
-                juce::String r;
-                r << "addAmp ok: " << (ok ? "yes" : "no") << "\n";
-                r << "numPlugins: " << channels[0]->getNumPlugins() << "\n";
-                if (auto* proc = channels[0]->getPlugin (0))
-                    r << "row name: " << proc->getName() << "\n";
+                auto src = scratch.getChildFile ("vibroverb")
+                                  .findChildFiles (juce::File::findFiles, false, "*.nam");
+                if (! src.isEmpty())
+                    rigId = lib.importNamFile (src.getReference (0), "Fender Vibroverb 1964",
+                                               juce::File(), juce::StringArray { "fender", "clean" },
+                                               false, juce::File(), importErr);
+            }
 
-                auto st = channels[0]->getState();
-                r << "saved slots: " << st.plugins.size() << "\n";
-                if (st.plugins.size() > 0)
+            juce::String r;
+            r << "import: " << (rigId.isNotEmpty() ? "OK id=" + rigId : "FAILED - " + importErr) << "\n";
+            if (rigId.isEmpty())
+            {
+                scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
+                return;
+            }
+
+            auto amp = std::make_shared<NamAmpProcessor>();
+            amp->prepareToPlay (48000.0, 512);
+            amp->loadRig (0, rigId);
+
+            // Poll for the async model load, then run the processing checks.
+            auto check = std::make_shared<std::function<void (int)>>();
+            *check = [amp, scratch, r, check] (int attempts) mutable
+            {
+                if (! amp->hasModel (0) && ! amp->didModelFail (0) && attempts < 30)
                 {
-                    r << "slot identifier: " << st.plugins.getReference (0).pluginIdentifier << "\n";
-                    r << "state bytes: " << (int) st.plugins.getReference (0).stateData.getSize() << "\n";
+                    juce::Timer::callAfterDelay (500, [check, attempts] { (*check) (attempts + 1); });
+                    return;
                 }
 
-                // knob roundtrip through the state blob
-                if (auto* amp = dynamic_cast<NamAmpProcessor*> (channels[0]->getPlugin (0)))
+                r << "model live: " << (amp->hasModel (0) ? "yes" : "no")
+                  << "  failed: " << (amp->didModelFail (0) ? "yes" : "no")
+                  << "  slimmable: " << (amp->isModelSlimmable (0) ? "yes" : "no")
+                  << "  srMismatch: " << (amp->hasSampleRateMismatch (0) ? "yes" : "no") << "\n";
+                if (amp->didModelFail (0))
+                    r << "load error: " << amp->getLastLoadError (0) << "\n";
+
+                if (amp->hasModel (0))
                 {
-                    amp->bassKnob = 7.5f;
-                    juce::MemoryBlock blob;
-                    amp->getStateInformation (blob);
-                    amp->bassKnob = 5.0f;
-                    amp->setStateInformation (blob.getData(), (int) blob.getSize());
-                    r << "knob roundtrip: " << (std::abs (amp->bassKnob.load() - 7.5f) < 0.01f ? "PASS" : "FAIL") << "\n";
+                    auto runBlock = [&amp]
+                    {
+                        juce::AudioBuffer<float> buf (2, 512);
+                        for (int i = 0; i < 512; ++i)
+                        {
+                            const float v = 0.1f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                             * 220.0f * (float) i / 48000.0f);
+                            buf.setSample (0, i, v);
+                            buf.setSample (1, i, v);
+                        }
+                        juce::MidiBuffer midi;
+                        // settle then measure
+                        for (int b = 0; b < 4; ++b)
+                        {
+                            juce::AudioBuffer<float> work (2, 512);
+                            work.makeCopyOf (buf);
+                            amp->processBlock (work, midi);
+                            if (b == 3)
+                                return std::make_pair (work.getRMSLevel (0, 0, 512),
+                                                       buf.getRMSLevel (0, 0, 512));
+                        }
+                        return std::make_pair (0.0f, 0.0f);
+                    };
+
+                    auto [outRms, inRms] = runBlock();
+                    r << "full: inRMS=" << juce::String (inRms, 5)
+                      << " outRMS=" << juce::String (outRms, 5)
+                      << " processed: " << (std::abs (outRms - inRms) > 0.0005f ? "PASS" : "FAIL (passthrough?)") << "\n";
+
+                    if (amp->isModelSlimmable (0))
+                    {
+                        amp->setUseLite (true);
+                        auto [liteRms, inRms2] = runBlock();
+                        juce::ignoreUnused (inRms2);
+                        r << "lite: outRMS=" << juce::String (liteRms, 5)
+                          << " nonSilent: " << (liteRms > 0.0001f ? "PASS" : "FAIL") << "\n";
+                        amp->setUseLite (false);
+                    }
                 }
 
-                // Open the editor through the real window path, let it paint,
-                // then remove the row (must close the window per disposal rule).
-                channels[0]->openPluginEditor (0);
-                juce::Timer::callAfterDelay (600, [this, scratch, r]() mutable
-                {
-                    channels[0]->removePlugin (0);   // leave the app clean
-                    r << "editor opened+closed, numPlugins now: " << channels[0]->getNumPlugins() << "\n";
-                    scratch.getChildFile ("amp_chain_selftest.txt").replaceWithText (r);
-                });
-            });
+                scratch.getChildFile ("amp_engine_selftest.txt").replaceWithText (r);
+            };
+            (*check) (0);
         });
     }
 #endif
@@ -131,11 +189,26 @@ MainComponent::MainComponent() : menuBar (this)
     for (auto* b : { &tapButton, &tunerButton, &panicButton,
                      &recordButton,
                      &metronomeButton, &loopRecButton,
-                     &routingModeButton, &toolbarExpandButton })
+                     &routingModeButton, &toolbarExpandButton, &ampsButton })
     {
         b->addListener (this);
         addAndMakeVisible (b);
     }
+
+    ampsButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3a2f1e));
+    ampsButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffd8a740));
+    ampsButton.setColour (juce::TextButton::textColourOnId, juce::Colour (0xffffd980));
+    ampsButton.setTooltip ("Open the Amp Locker: your NAM rig and cabinet library.");
+
+    // Amp editors ask for the browser through this rendezvous.
+    AmpLibrary::instance().onPickRequested =
+        [this] (AmpLibraryEntry::Kind kind, std::function<void (juce::String)> cb)
+    {
+        auto& win = ensureAmpBrowser();
+        win.getContent().enterPickMode (kind, std::move (cb));
+        win.setVisible (true);
+        win.toFront (true);
+    };
 
     tunerButton.setComponentID ("icon_tuner");
     panicButton.setComponentID ("icon_panic");
@@ -2147,8 +2220,10 @@ void MainComponent::resized()
     playLoopButton.setBounds (transport.removeFromLeft (bwNarrow));
     transport.removeFromLeft (8);
 
-    // Metronome, Looper, and Routing
+    // Metronome, Looper, Amps, and Routing
     metronomeButton.setBounds (transport.removeFromLeft (bw));
+    transport.removeFromLeft (3);
+    ampsButton.setBounds (transport.removeFromLeft (bw));
     transport.removeFromLeft (3);
     loopRecButton.setBounds (transport.removeFromLeft (bw));
     transport.removeFromLeft (1);
@@ -2304,6 +2379,21 @@ void MainComponent::resized()
 }
 
 //==============================================================================
+AmpLibraryBrowserWindow& MainComponent::ensureAmpBrowser()
+{
+    if (ampBrowserWindow == nullptr)
+    {
+        ampBrowserWindow = std::make_unique<AmpLibraryBrowserWindow>();
+        ampBrowserWindow->getContent().onImportRequested = [this] (juce::File f)
+        {
+            // Import dialog lands in the import-flow task; log until then.
+            juce::Logger::writeToLog ("Amp import requested: " + f.getFullPathName());
+        };
+    }
+    return *ampBrowserWindow;
+}
+
+//==============================================================================
 void MainComponent::buttonClicked (juce::Button* b)
 {
     // Input source
@@ -2335,6 +2425,13 @@ void MainComponent::buttonClicked (juce::Button* b)
         if (cassetteDeckWindow == nullptr)
             cassetteDeckWindow = std::make_unique<CassetteDeckWindow> (inputRouter);
         cassetteDeckWindow->toggleVisible();
+    }
+    else if (b == &ampsButton)
+    {
+        auto& win = ensureAmpBrowser();
+        if (! win.isVisible())
+            win.getContent().enterManageMode();
+        win.toggleVisible();
     }
 
     // Tap tempo

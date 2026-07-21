@@ -32,6 +32,7 @@
 #include "LoopStationWindow.h"
 #include "MetronomeWindow.h"
 #include "ReelRecorderWindow.h"
+#include "AmpLibraryBrowserWindow.h"
 
 /**
  * MainComponent  v0.4 - Mixer-Style Layout
@@ -343,6 +344,9 @@ private:
     std::unique_ptr<LoopStationWindow>  loopStationWindow;
     std::unique_ptr<MetronomeWindow>    metronomeWindow;
     std::unique_ptr<ReelRecorderWindow> reelRecorderWindow;
+    std::unique_ptr<AmpLibraryBrowserWindow> ampBrowserWindow;
+    juce::TextButton ampsButton { "AMPS" };
+    AmpLibraryBrowserWindow& ensureAmpBrowser();
 
     // MIDI activity LED + monitor
     juce::Label midiLedLabel;

@@ -112,7 +112,7 @@ void NamAmpProcessor::loadRig (int side, const juce::String& rigId)
     if (s.cabId.isEmpty())
         setCab (side, {});
 
-    const std::string path = entry->namFile.getFullPathName().toStdString();
+    const juce::String path = entry->namFile.getFullPathName();
     const double sr = sampleRate;
     const int mb = juce::jmax (16, maxBlock);
 
@@ -124,7 +124,14 @@ void NamAmpProcessor::loadRig (int side, const juce::String& rigId)
         {
             nam::DspLoadOptions options;
             options.prewarm = false;                     // Reset() below prewarms
-            newModel = nam::get_dsp (std::filesystem::path (path), options);
+            // Build the path from UTF-16 so non-ASCII filenames (e.g. "®")
+            // survive on Windows; a UTF-8 std::string would be read as ANSI.
+           #if JUCE_WINDOWS
+            std::filesystem::path fsPath (path.toWideCharPointer());
+           #else
+            std::filesystem::path fsPath (path.toStdString());
+           #endif
+            newModel = nam::get_dsp (fsPath, options);
             if (newModel != nullptr && sr > 0)
                 newModel->Reset (sr, mb);                // prewarms by default
         }
@@ -144,7 +151,8 @@ void NamAmpProcessor::loadRig (int side, const juce::String& rigId)
 
             if (incoming == nullptr)
             {
-                juce::Logger::writeToLog ("NamAmp: model load failed: " + juce::String (error));
+                sd.lastLoadError = juce::String (error);
+                juce::Logger::writeToLog ("NamAmp: model load failed: " + sd.lastLoadError);
                 sd.failed = true;
                 sd.modelLive = false;
             }
