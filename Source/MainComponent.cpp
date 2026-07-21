@@ -15,6 +15,25 @@ static juce::String panText (double v)
 //==============================================================================
 MainComponent::MainComponent() : menuBar (this)
 {
+#if JUCE_DEBUG
+    // TEMP (Task 1 verification): amp-library self-test, removed once a real A2
+    // capture has confirmed the version predicate.
+    {
+        juce::String report;
+        auto scratch = juce::File (R"(C:\Users\alex\AppData\Local\Temp\claude\C--projects-A18-UpStage\81cf921b-2c4c-41a0-9cc5-8cd02c1222d3\scratchpad)");
+        juce::String err;
+        const bool a1Accepted = AmpLibrary::isA2NamFile (scratch.getChildFile ("fake_a1.nam"), err);
+        report << "A1 reject test: " << (a1Accepted ? "FAIL (accepted!)" : "PASS - " + err) << "\n";
+        err.clear();
+        const bool a2Accepted = AmpLibrary::isA2NamFile (scratch.getChildFile ("fake_a2.nam"), err);
+        report << "A2 accept test: " << (a2Accepted ? "PASS" : "FAIL - " + err) << "\n";
+        AmpLibrary::instance().rescan();
+        report << "Library root: " << AmpLibrary::instance().getRootFolder().getFullPathName() << "\n";
+        report << "Entries: " << AmpLibrary::instance().getEntries().size() << "\n";
+        scratch.getChildFile ("amp_library_selftest.txt").replaceWithText (report);
+    }
+#endif
+
     pluginFormatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
 
     DBG ("Plugin formats registered: " + juce::String (pluginFormatManager.getNumFormats()));

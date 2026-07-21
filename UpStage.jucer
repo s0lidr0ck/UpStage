@@ -121,6 +121,10 @@
       <FILE id="UndoActionsH" name="UndoActions.h" compile="0" resource="0"
             file="Source/UndoActions.h"/>
       <FILE id="VuMeterH" name="VuMeter.h" compile="0" resource="0" file="Source/VuMeter.h"/>
+      <FILE id="AmpLibraryH" name="AmpLibrary.h" compile="0" resource="0"
+            file="Source/AmpLibrary.h"/>
+      <FILE id="AmpLibraryCpp" name="AmpLibrary.cpp" compile="1" resource="0"
+            file="Source/AmpLibrary.cpp"/>
     </GROUP>
     <GROUP id="ThirdPartyNAM" name="ThirdParty-NAM">
       <FILE id="NamActCpp" name="activations.cpp" compile="1" resource="0"

@@ -27,6 +27,7 @@
 #include "MidiRulesPanel.h"
 #include "SongBar.h"
 #include "LoadingOverlay.h"
+#include "AmpLibrary.h"
 #include "CassetteDeckWindow.h"
 #include "LoopStationWindow.h"
 #include "MetronomeWindow.h"

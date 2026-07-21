@@ -173,6 +173,7 @@
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\..\Source\SongBar.cpp"/>
+    <ClCompile Include="..\..\Source\AmpLibrary.cpp"/>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\activations.cpp"/>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\container.cpp"/>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\conv1d.cpp"/>
@@ -3072,6 +3073,7 @@
     <ClInclude Include="..\..\Source\StereoSpreadMeter.h"/>
     <ClInclude Include="..\..\Source\UndoActions.h"/>
     <ClInclude Include="..\..\Source\VuMeter.h"/>
+    <ClInclude Include="..\..\Source\AmpLibrary.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\buffers\juce_AudioChannelSet.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\buffers\juce_AudioDataConverters.h"/>
