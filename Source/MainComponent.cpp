@@ -2265,9 +2265,9 @@ AmpLibraryBrowserWindow& MainComponent::ensureAmpBrowser()
     if (ampBrowserWindow == nullptr)
     {
         ampBrowserWindow = std::make_unique<AmpLibraryBrowserWindow>();
-        ampBrowserWindow->getContent().onImportRequested = [] (juce::File f)
+        ampBrowserWindow->getContent().onImportRequested = [] (const juce::Array<juce::File>& files)
         {
-            AmpImportDialog::show (f);
+            AmpImportDialog::showForFiles (files);
         };
     }
     return *ampBrowserWindow;
@@ -2283,19 +2283,6 @@ bool MainComponent::isInterestedInFileDrag (const juce::StringArray& files)
     return false;
 }
 
-static void importAmpFileQueue (juce::Array<juce::File> files, int index)
-{
-    if (index >= files.size())
-        return;
-    AmpImportDialog::show (files[index], [files, index]
-    {
-        juce::MessageManager::callAsync ([files, index]
-        {
-            importAmpFileQueue (files, index + 1);
-        });
-    });
-}
-
 void MainComponent::filesDropped (const juce::StringArray& files, int, int)
 {
     juce::Array<juce::File> matching;
@@ -2303,8 +2290,8 @@ void MainComponent::filesDropped (const juce::StringArray& files, int, int)
         if (f.endsWithIgnoreCase (".nam") || f.endsWithIgnoreCase (".wav"))
             matching.add (juce::File (f));
 
-    if (! matching.isEmpty())
-        importAmpFileQueue (matching, 0);
+    // One file gets the full import card; several get a single batch dialog.
+    AmpImportDialog::showForFiles (matching);
 }
 
 //==============================================================================
@@ -3054,7 +3041,16 @@ void MainComponent::loadProjectData (const ProjectData& data)
         channels[i]->setInputGain  (data.channels[i].inputGain);
         channels[i]->setOutputGain (data.channels[i].outputGain);
         channels[i]->setPan        (data.channels[i].pan);
+
+        // Sync the strip UI to the loaded values (same idiom as scene apply) —
+        // without this the faders/trims sit at stale positions and the first
+        // touch snaps the audio back to wherever the control was left.
+        outputFaders[i].setValue (juce::Decibels::gainToDecibels (data.channels[i].outputGain),
+                                  juce::dontSendNotification);
+        inputTrimKnobs[i].setValue (juce::Decibels::gainToDecibels (data.channels[i].inputGain),
+                                    juce::dontSendNotification);
         outputGainKnobs[i].setValue (data.channels[i].pan, juce::dontSendNotification);
+        updateFaderLabel (i);
         channelStripPanels[i]->setAppearances (data.channels[i].pluginAppearances);
     }
 
