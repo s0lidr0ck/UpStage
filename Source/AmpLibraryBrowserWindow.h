@@ -33,15 +33,21 @@ public:
         importButton.onClick = [this]
         {
             auto chooser = std::make_shared<juce::FileChooser> (
-                "Import NAM capture or cabinet IR", juce::File{}, "*.nam;*.wav");
+                "Import NAM captures and/or cabinet IRs", juce::File{}, "*.nam;*.wav");
             juce::Component::SafePointer<AmpLibraryBrowserContent> safe (this);
             chooser->launchAsync (juce::FileBrowserComponent::openMode |
-                                  juce::FileBrowserComponent::canSelectFiles,
+                                  juce::FileBrowserComponent::canSelectFiles |
+                                  juce::FileBrowserComponent::canSelectMultipleItems,
                 [safe, chooser] (const juce::FileChooser& fc)
                 {
-                    auto f = fc.getResult();
-                    if (safe != nullptr && f.existsAsFile() && safe->onImportRequested)
-                        safe->onImportRequested (f);
+                    if (safe == nullptr || ! safe->onImportRequested)
+                        return;
+                    juce::Array<juce::File> files;
+                    for (const auto& f : fc.getResults())
+                        if (f.existsAsFile())
+                            files.add (f);
+                    if (! files.isEmpty())
+                        safe->onImportRequested (files);
                 });
         };
         addAndMakeVisible (importButton);
@@ -80,7 +86,7 @@ public:
         rebuild();
     }
 
-    std::function<void (juce::File)> onImportRequested;
+    std::function<void (const juce::Array<juce::File>&)> onImportRequested;
 
     //==========================================================================
     void paint (juce::Graphics& g) override

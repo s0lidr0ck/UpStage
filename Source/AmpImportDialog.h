@@ -13,6 +13,22 @@
 class AmpImportDialog : public juce::Component
 {
 public:
+    /** Entry point for any number of files: one file gets the full per-file
+        card; several files get a single batch dialog (shared tags, names from
+        filenames) so a folder of downloads imports in one go. */
+    static void showForFiles (const juce::Array<juce::File>& files)
+    {
+        juce::Array<juce::File> valid;
+        for (const auto& f : files)
+            if (f.existsAsFile())
+                valid.add (f);
+
+        if (valid.size() == 1)
+            show (valid.getReference (0));
+        else if (valid.size() > 1)
+            showBatch (valid);
+    }
+
     /** Shows the dialog for a source file. onDone runs after the dialog closes
         (whether or not an import happened) - used to chain multi-file drops. */
     static void show (const juce::File& sourceFile, std::function<void()> onDone = nullptr)
@@ -62,6 +78,171 @@ public:
     }
 
 private:
+    //==========================================================================
+    /** Batch import: one dialog for N files. Rigs are named from their
+        filenames; pictures and per-rig details are edited later in the Locker. */
+    class BatchContent : public juce::Component
+    {
+    public:
+        explicit BatchContent (juce::Array<juce::File> filesIn)
+            : files (std::move (filesIn))
+        {
+            int rigs = 0, irs = 0;
+            juce::String names;
+            for (const auto& f : files)
+            {
+                (f.hasFileExtension ("nam") ? rigs : irs)++;
+                names << f.getFileName() << "\n";
+            }
+
+            summaryLabel.setText (juce::String (rigs) + " rig(s), " + juce::String (irs) + " IR(s)",
+                                  juce::dontSendNotification);
+            summaryLabel.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+            summaryLabel.setColour (juce::Label::textColourId, juce::Colour (0xffb5b1a6));
+            addAndMakeVisible (summaryLabel);
+
+            fileList.setMultiLine (true);
+            fileList.setReadOnly (true);
+            fileList.setScrollbarsShown (true);
+            fileList.setText (names, juce::dontSendNotification);
+            addAndMakeVisible (fileList);
+
+            tagsLabel.setText ("Tags for all (comma-separated)", juce::dontSendNotification);
+            tagsLabel.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+            tagsLabel.setColour (juce::Label::textColourId, juce::Colour (0xffb5b1a6));
+            addAndMakeVisible (tagsLabel);
+            tagsEditor.setTextToShowWhenEmpty ("clean, crunch, fender...", juce::Colour (0xff777364));
+            addAndMakeVisible (tagsEditor);
+
+            cabBakedToggle.setButtonText ("Captures include cabinet (applies to all rigs)");
+            addAndMakeVisible (cabBakedToggle);
+
+            importButton.onClick = [this] { doBatchImport(); };
+            addAndMakeVisible (importButton);
+            cancelButton.onClick = [this] { close(); };
+            addAndMakeVisible (cancelButton);
+
+            setSize (440, 330);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (14, 10);
+            summaryLabel.setBounds (area.removeFromTop (18));
+            area.removeFromTop (4);
+            fileList.setBounds (area.removeFromTop (120));
+            area.removeFromTop (10);
+            tagsLabel.setBounds (area.removeFromTop (16));
+            tagsEditor.setBounds (area.removeFromTop (24));
+            area.removeFromTop (10);
+            cabBakedToggle.setBounds (area.removeFromTop (24));
+            auto buttons = area.removeFromBottom (30);
+            cancelButton.setBounds (buttons.removeFromRight (90));
+            buttons.removeFromRight (8);
+            importButton.setBounds (buttons.removeFromRight (110));
+        }
+
+    private:
+        void doBatchImport()
+        {
+            auto& lib = AmpLibrary::instance();
+            auto tags = juce::StringArray::fromTokens (tagsEditor.getText(), ",", "");
+            tags.trim();
+            tags.removeEmptyStrings();
+            const bool cabBaked = cabBakedToggle.getToggleState();
+
+            int ok = 0;
+            juce::StringArray failures;
+            for (const auto& f : files)
+            {
+                juce::String err;
+                juce::String id;
+                if (f.hasFileExtension ("nam"))
+                    id = lib.importNamFile (f, f.getFileNameWithoutExtension(), juce::File(),
+                                            tags, cabBaked, juce::File(), err);
+                else
+                    id = lib.importIrFile (f, f.getFileNameWithoutExtension(), juce::File(),
+                                           tags, err);
+                if (id.isNotEmpty())
+                    ++ok;
+                else
+                    failures.add (f.getFileName() + ": " + err);
+            }
+
+            close();
+
+            if (! failures.isEmpty())
+                juce::AlertWindow::showAsync (
+                    juce::MessageBoxOptions()
+                        .withIconType (juce::MessageBoxIconType::WarningIcon)
+                        .withTitle ("Imported " + juce::String (ok) + " of "
+                                    + juce::String (files.size()) + " files")
+                        .withMessage (failures.joinIntoString ("\n\n"))
+                        .withButton ("OK"),
+                    nullptr);
+        }
+
+        void close()
+        {
+            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                dw->exitModalState (0);
+            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                dw->setVisible (false);
+        }
+
+        juce::Array<juce::File> files;
+        juce::Label summaryLabel, tagsLabel;
+        juce::TextEditor fileList, tagsEditor;
+        juce::ToggleButton cabBakedToggle;
+        juce::TextButton importButton { "IMPORT ALL" }, cancelButton { "Cancel" };
+    };
+
+    static void showBatch (const juce::Array<juce::File>& files)
+    {
+        // A1 / unreadable rigs fail fast before the dialog so the batch list
+        // only contains importable files; rejected names are reported at once.
+        juce::Array<juce::File> importable;
+        juce::StringArray rejected;
+        for (const auto& f : files)
+        {
+            if (f.hasFileExtension ("nam"))
+            {
+                juce::String err;
+                if (! AmpLibrary::isA2NamFile (f, err))
+                {
+                    rejected.add (f.getFileName() + ": " + err);
+                    continue;
+                }
+            }
+            importable.add (f);
+        }
+
+        auto launch = [importable]
+        {
+            if (importable.isEmpty())
+                return;
+            juce::DialogWindow::LaunchOptions opts;
+            opts.content.setOwned (new BatchContent (importable));
+            opts.dialogTitle = "Import " + juce::String (importable.size()) + " Files";
+            opts.dialogBackgroundColour = juce::Colour (0xff2a2825);
+            opts.escapeKeyTriggersCloseButton = true;
+            opts.useNativeTitleBar = false;
+            opts.resizable = false;
+            opts.launchAsync();
+        };
+
+        if (! rejected.isEmpty())
+            juce::AlertWindow::showAsync (
+                juce::MessageBoxOptions()
+                    .withIconType (juce::MessageBoxIconType::WarningIcon)
+                    .withTitle (juce::String (rejected.size()) + " file(s) can't be imported")
+                    .withMessage (rejected.joinIntoString ("\n\n"))
+                    .withButton ("OK"),
+                [launch] (int) { launch(); });
+        else
+            launch();
+    }
+
     AmpImportDialog (const juce::File& src, bool rig, std::function<void()> done)
         : sourceFile (src), isRig (rig), onDone (std::move (done))
     {
