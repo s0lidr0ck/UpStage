@@ -18,6 +18,7 @@ static juce::String panText (double v)
 //==============================================================================
 MainComponent::MainComponent() : menuBar (this)
 {
+
     pluginFormatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
 
     DBG ("Plugin formats registered: " + juce::String (pluginFormatManager.getNumFormats()));
@@ -3130,11 +3131,13 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
             {
                 juce::MemoryBlock ampBlob = slot.stateData;
                 bool ampBypassed = slot.isBypassed;
+                juce::Colour ampTint = slot.tint;
+                juce::String ampNick = slot.nickname;
                 int ampChan = i, ampSlot = slotIndex;
                 // Role restores from the state blob; kind here only picks the class.
                 const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
 
-                channels[i]->addInternalRow (rowKind, [this, ampChan, ampSlot, ampBlob, ampBypassed] (bool ok)
+                channels[i]->addInternalRow (rowKind, [this, ampChan, ampSlot, ampBlob, ampBypassed, ampTint, ampNick] (bool ok)
                 {
                     if (ok)
                     {
@@ -3142,6 +3145,7 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
                             if (auto* proc = channels[ampChan]->getPlugin (ampSlot))
                                 proc->setStateInformation (ampBlob.getData(), (int) ampBlob.getSize());
                         channels[ampChan]->setPluginBypassed (ampSlot, ampBypassed);
+                        channels[ampChan]->setPluginAppearance (ampSlot, ampTint, ampNick);
                     }
                     juce::MessageManager::callAsync ([this, ampChan] {
                         channelStripPanels[ampChan]->refresh();
@@ -3164,10 +3168,12 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
 
             juce::MemoryBlock stateBlob = slot.stateData;
             bool bypassed   = slot.isBypassed;
+            juce::Colour slotTint = slot.tint;
+            juce::String slotNick = slot.nickname;
             int  chanIdx    = i;
             int  slotIdx    = slotIndex;
 
-            channels[i]->addPlugin (desc, [this, chanIdx, slotIdx, stateBlob, bypassed] (bool ok)
+            channels[i]->addPlugin (desc, [this, chanIdx, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
             {
                 if (ok)
                 {
@@ -3175,6 +3181,7 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
                         if (auto* proc = channels[chanIdx]->getPlugin (slotIdx))
                             proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
                     channels[chanIdx]->setPluginBypassed (slotIdx, bypassed);
+                    channels[chanIdx]->setPluginAppearance (slotIdx, slotTint, slotNick);
                 }
                 juce::MessageManager::callAsync ([this, chanIdx] {
                     channelStripPanels[chanIdx]->refresh();
@@ -3195,10 +3202,12 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         {
             juce::MemoryBlock ampBlob = slot.stateData;
             bool ampBypassed = slot.isBypassed;
+            juce::Colour ampTint = slot.tint;
+            juce::String ampNick = slot.nickname;
             int ampSlot = slotIndex;
             const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
 
-            inputChannel->addInternalRow (rowKind, [this, ampSlot, ampBlob, ampBypassed] (bool ok)
+            inputChannel->addInternalRow (rowKind, [this, ampSlot, ampBlob, ampBypassed, ampTint, ampNick] (bool ok)
             {
                 if (ok)
                 {
@@ -3206,6 +3215,7 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
                         if (auto* proc = inputChannel->getPlugin (ampSlot))
                             proc->setStateInformation (ampBlob.getData(), (int) ampBlob.getSize());
                     inputChannel->setPluginBypassed (ampSlot, ampBypassed);
+                    inputChannel->setPluginAppearance (ampSlot, ampTint, ampNick);
                 }
                 juce::MessageManager::callAsync ([this] {
                     inputChannelPanel->refresh();
@@ -3227,9 +3237,11 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         }
         juce::MemoryBlock stateBlob = slot.stateData;
         bool bypassed = slot.isBypassed;
+        juce::Colour slotTint = slot.tint;
+        juce::String slotNick = slot.nickname;
         int slotIdx = slotIndex;
 
-        inputChannel->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
+        inputChannel->addPlugin (desc, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
         {
             if (ok)
             {
@@ -3237,6 +3249,7 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
                     if (auto* proc = inputChannel->getPlugin (slotIdx))
                         proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
                 inputChannel->setPluginBypassed (slotIdx, bypassed);
+                inputChannel->setPluginAppearance (slotIdx, slotTint, slotNick);
             }
             juce::MessageManager::callAsync ([this] {
                 inputChannelPanel->refresh();
@@ -3261,9 +3274,11 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         }
         juce::MemoryBlock stateBlob = slot.stateData;
         bool bypassed               = slot.isBypassed;
+        juce::Colour slotTint       = slot.tint;
+        juce::String slotNick       = slot.nickname;
         int  slotIdx                = slotIndex;
 
-        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed] (bool ok)
+        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
         {
             if (ok)
             {
@@ -3271,6 +3286,7 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
                     if (auto* proc = fxBus->getPlugin (slotIdx))
                         proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
                 fxBus->setPluginBypassed (slotIdx, bypassed);
+                fxBus->setPluginAppearance (slotIdx, slotTint, slotNick);
             }
             juce::MessageManager::callAsync ([this] {
                 fxBusPanel->refresh();

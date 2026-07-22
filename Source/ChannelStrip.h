@@ -73,6 +73,12 @@ public:
         juce::String identifier;
         bool         bypassed = false;
 
+        // Per-slot appearance: stored on the entry so two instances of the
+        // same plugin keep separate nicknames/tints, and reorder/remove carry
+        // them automatically. Message thread only.
+        juce::Colour tint { 0x00000000 };
+        juce::String nickname;
+
         // Editor window for this plugin, if currently open. Non-owning safe
         // pointer: the window self-deletes when the user closes it (and this
         // auto-nulls), but we also force it closed before the processor is
@@ -82,6 +88,9 @@ public:
     };
 
     const PluginEntry& getPluginEntry (int chainIndex) const;
+
+    /** Sets the per-slot nickname + tint (message thread). */
+    void setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname);
 
     //==========================================================================
     // Processing

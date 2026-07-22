@@ -240,6 +240,8 @@ juce::XmlElement* ProjectState::channelToXml (const ChannelState& ch, int index)
         plugEl->setAttribute ("identifier", slot.pluginIdentifier);
         plugEl->setAttribute ("name",       slot.pluginName);
         plugEl->setAttribute ("bypassed",   slot.isBypassed ? 1 : 0);
+        plugEl->setAttribute ("tint",       (int) slot.tint.getARGB());
+        plugEl->setAttribute ("nickname",   slot.nickname);
 
         // Encode plugin state as base64
         if (slot.stateData.getSize() > 0)
@@ -278,6 +280,8 @@ bool ProjectState::xmlToChannel (const juce::XmlElement* el, ChannelState& ch)
         slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");
         slot.pluginName       = plugEl->getStringAttribute ("name");
         slot.isBypassed       = plugEl->getIntAttribute ("bypassed", 0) != 0;
+        slot.tint             = juce::Colour ((juce::uint32) plugEl->getIntAttribute ("tint", 0));
+        slot.nickname         = plugEl->getStringAttribute ("nickname");
 
         juce::String b64 = plugEl->getStringAttribute ("state");
         if (b64.isNotEmpty())
@@ -429,6 +433,8 @@ juce::XmlElement* ProjectState::fxBusStateToXml (const ProjectData::FxBusState& 
         plugEl->setAttribute ("identifier", slot.pluginIdentifier);
         plugEl->setAttribute ("name",       slot.pluginName);
         plugEl->setAttribute ("bypassed",   slot.isBypassed ? 1 : 0);
+        plugEl->setAttribute ("tint",       (int) slot.tint.getARGB());
+        plugEl->setAttribute ("nickname",   slot.nickname);
         if (slot.stateData.getSize() > 0)
         {
             juce::String b64 = juce::Base64::toBase64 (slot.stateData.getData(),
@@ -460,6 +466,8 @@ bool ProjectState::xmlToFxBusState (const juce::XmlElement* el,
         slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");
         slot.pluginName       = plugEl->getStringAttribute ("name");
         slot.isBypassed       = plugEl->getIntAttribute    ("bypassed", 0) != 0;
+        slot.tint             = juce::Colour ((juce::uint32) plugEl->getIntAttribute ("tint", 0));
+        slot.nickname         = plugEl->getStringAttribute ("nickname");
 
         juce::String b64 = plugEl->getStringAttribute ("state");
         if (b64.isNotEmpty())

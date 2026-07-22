@@ -30,16 +30,21 @@ void ChannelStripPanel::rebuildSlots()
 
             if (proc != nullptr)
             {
-                auto it = pluginAppearance.find (proc->getName());
-                if (it != pluginAppearance.end())
+                // Per-slot appearance lives on the chain entry. Legacy projects
+                // stored it keyed by plugin name - fall back to that map when
+                // the entry carries nothing, so old projects still display.
+                const auto& entry = strip.getPluginEntry (i);
+                slots[i].tintColour = entry.tint;
+                slots[i].nickname   = entry.nickname;
+
+                if (entry.nickname.isEmpty() && entry.tint.getARGB() == 0)
                 {
-                    slots[i].tintColour = it->second.tint;
-                    slots[i].nickname = it->second.nickname;
-                }
-                else
-                {
-                    slots[i].tintColour = juce::Colour (0x00000000);
-                    slots[i].nickname = "";
+                    auto it = pluginAppearance.find (proc->getName());
+                    if (it != pluginAppearance.end())
+                    {
+                        slots[i].tintColour = it->second.tint;
+                        slots[i].nickname = it->second.nickname;
+                    }
                 }
             }
         }
@@ -341,13 +346,12 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
         auto storeAppearance = [this, slotIndex] ()
         {
             if (slotIndex >= strip.getNumPlugins()) return;
-            auto* proc = strip.getPlugin (slotIndex);
-            if (proc != nullptr)
-            {
-                auto& a = pluginAppearance[proc->getName()];
-                a.tint     = slots[slotIndex].tintColour;
-                a.nickname = slots[slotIndex].nickname;
-            }
+            strip.setPluginAppearance (slotIndex, slots[slotIndex].tintColour,
+                                       slots[slotIndex].nickname);
+            // Retire any legacy name-keyed value so it can't shadow the
+            // per-slot one on the next rebuild.
+            if (auto* proc = strip.getPlugin (slotIndex))
+                pluginAppearance.erase (proc->getName());
         };
 
         switch (result)
@@ -500,14 +504,9 @@ void ChannelStripPanel::showNicknameDialog (int slotIndex)
             {
                 auto nick = aw->getTextEditorContents ("nickname").trim();
                 slots[slotIndex].nickname = nick;
-
-                auto* proc = strip.getPlugin (slotIndex);
-                if (proc != nullptr)
-                {
-                    auto& a = pluginAppearance[proc->getName()];
-                    a.nickname = nick;
-                    a.tint = slots[slotIndex].tintColour;
-                }
+                strip.setPluginAppearance (slotIndex, slots[slotIndex].tintColour, nick);
+                if (auto* proc = strip.getPlugin (slotIndex))
+                    pluginAppearance.erase (proc->getName());
                 repaint();
             }
             delete aw;

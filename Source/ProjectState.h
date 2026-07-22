@@ -20,6 +20,10 @@ struct PluginSlotState
     juce::String pluginName;
     juce::MemoryBlock stateData;     // raw bytes from getStateInformation()
     bool         isBypassed = false;
+    // Per-slot appearance. Lives on the slot (not keyed by plugin name) so two
+    // instances of the same plugin keep separate nicknames/tints.
+    juce::Colour tint { 0x00000000 };
+    juce::String nickname;
 };
 
 struct PluginAppearanceState

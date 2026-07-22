@@ -97,8 +97,13 @@ void FxBusPanel::rebuildSlots()
             slots[i].bypassed = bus.isPluginBypassed (i);
             slots[i].empty = false;
 
-            auto it = pluginAppearance.find (slots[i].name);
-            slots[i].nickname = (it != pluginAppearance.end()) ? it->second.nickname : juce::String();
+            // Per-slot nickname (legacy name-keyed map as fallback for old projects).
+            slots[i].nickname = bus.getPluginNickname (i);
+            if (slots[i].nickname.isEmpty())
+            {
+                auto it = pluginAppearance.find (slots[i].name);
+                slots[i].nickname = (it != pluginAppearance.end()) ? it->second.nickname : juce::String();
+            }
         }
         else
         {
@@ -490,8 +495,10 @@ void FxBusPanel::showNicknameDialog (int slotIndex)
             {
                 auto nick = aw->getTextEditorContents ("nickname").trim();
                 slots[slotIndex].nickname = nick;
+                bus.setPluginAppearance (slotIndex, bus.getPluginTint (slotIndex), nick);
+                // Retire the legacy name-keyed value so it can't shadow this.
                 if (auto* proc = bus.getPlugin (slotIndex))
-                    pluginAppearance[proc->getName()].nickname = nick;
+                    pluginAppearance.erase (proc->getName());
                 refresh();
             }
             delete aw;

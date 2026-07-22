@@ -276,6 +276,8 @@ FxBus::State FxBus::getState() const
         slot.pluginIdentifier = entry->identifier;
         slot.pluginName       = entry->processor ? entry->processor->getName() : "";
         slot.isBypassed       = entry->bypassed;
+        slot.tint             = entry->tint;
+        slot.nickname         = entry->nickname;
 
         if (entry->processor != nullptr)
             entry->processor->getStateInformation (slot.stateData);
@@ -295,9 +297,37 @@ void FxBus::setState (const State& s)
     {
         const auto& slot = s.plugins.getReference (i);
         pluginChain[i]->bypassed = slot.isBypassed;
+        pluginChain[i]->tint     = slot.tint;
+        pluginChain[i]->nickname = slot.nickname;
 
         if (pluginChain[i]->processor != nullptr && slot.stateData.getSize() > 0)
             pluginChain[i]->processor->setStateInformation (
                 slot.stateData.getData(), (int) slot.stateData.getSize());
     }
+}
+
+void FxBus::setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname)
+{
+    juce::ScopedLock sl (chainLock);
+    if (auto* entry = pluginChain[chainIndex])
+    {
+        entry->tint = tint;
+        entry->nickname = nickname;
+    }
+}
+
+juce::Colour FxBus::getPluginTint (int chainIndex) const
+{
+    juce::ScopedLock sl (chainLock);
+    if (auto* entry = pluginChain[chainIndex])
+        return entry->tint;
+    return juce::Colour (0x00000000);
+}
+
+juce::String FxBus::getPluginNickname (int chainIndex) const
+{
+    juce::ScopedLock sl (chainLock);
+    if (auto* entry = pluginChain[chainIndex])
+        return entry->nickname;
+    return {};
 }

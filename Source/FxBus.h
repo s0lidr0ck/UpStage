@@ -58,12 +58,21 @@ public:
     State getState() const;
     void  setState (const State& s);
 
+    /** Sets the per-slot nickname + tint (message thread). */
+    void setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname);
+    juce::Colour getPluginTint (int chainIndex) const;
+    juce::String getPluginNickname (int chainIndex) const;
+
 private:
     struct PluginEntry
     {
         std::unique_ptr<juce::AudioPluginInstance> processor;
         juce::String identifier;
         bool         bypassed = false;
+
+        // Per-slot appearance (see ChannelStrip::PluginEntry). Message thread.
+        juce::Colour tint { 0x00000000 };
+        juce::String nickname;
 
         // Editor window for this plugin, if open. Non-owning safe pointer: the
         // window self-deletes when closed (auto-nulling this), but we also

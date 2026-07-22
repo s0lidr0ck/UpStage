@@ -376,6 +376,16 @@ void ChannelStrip::setInputGain  (float g) { inputGainTarget.store (g); }
 void ChannelStrip::setOutputGain (float g) { outputGainTarget.store (g); }
 
 //==============================================================================
+void ChannelStrip::setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname)
+{
+    juce::ScopedLock sl (chainLock);
+    if (auto* entry = pluginChain[chainIndex])
+    {
+        entry->tint = tint;
+        entry->nickname = nickname;
+    }
+}
+
 ChannelState ChannelStrip::getState() const
 {
     ChannelState state;
@@ -391,6 +401,8 @@ ChannelState ChannelStrip::getState() const
         slot.pluginIdentifier = entry->identifier;
         slot.pluginName       = entry->processor ? entry->processor->getName() : "";
         slot.isBypassed       = entry->bypassed;
+        slot.tint             = entry->tint;
+        slot.nickname         = entry->nickname;
 
         if (entry->processor != nullptr)
             entry->processor->getStateInformation (slot.stateData);
@@ -414,6 +426,8 @@ void ChannelStrip::setState (const ChannelState& state)
     {
         const auto& slot = state.plugins.getReference (i);
         pluginChain[i]->bypassed = slot.isBypassed;
+        pluginChain[i]->tint     = slot.tint;
+        pluginChain[i]->nickname = slot.nickname;
 
         if (pluginChain[i]->processor != nullptr && slot.stateData.getSize() > 0)
             pluginChain[i]->processor->setStateInformation (

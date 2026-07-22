@@ -63,6 +63,16 @@ public:
         };
         addAndMakeVisible (importButton);
 
+        doneButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff8fd98f));
+        doneButton.onClick = [this]
+        {
+            if (auto* win = findParentComponentOfClass<juce::DocumentWindow>())
+                win->setVisible (false);
+            enterManageMode();
+        };
+        doneButton.setVisible (false);
+        addAndMakeVisible (doneButton);
+
         cardHolder = std::make_unique<juce::Component>();
         viewport.setViewedComponent (cardHolder.get(), false);
         viewport.setScrollBarsShown (true, false);
@@ -83,6 +93,8 @@ public:
     {
         pickMode = false;
         pickCallback = nullptr;
+        doneButton.setVisible (false);
+        importButton.setVisible (true);
         modeLabel.setText ("AMP LOCKER", juce::dontSendNotification);
         rebuild();
     }
@@ -104,6 +116,8 @@ public:
         else
             title = irish ? "PICK A CAB / SPACE" : "PICK A RIG";
         modeLabel.setText (title, juce::dontSendNotification);
+        doneButton.setVisible (true);
+        importButton.setVisible (false);
         rebuild();
     }
 
@@ -129,6 +143,7 @@ public:
         modeLabel.setBounds (top.removeFromLeft (130));
         top.removeFromLeft (8);
         importButton.setBounds (top.removeFromRight (86));
+        doneButton.setBounds (importButton.getBounds());   // same spot, one visible at a time
         top.removeFromRight (8);
         tagFilter.setBounds (top.removeFromRight (120));
         top.removeFromRight (6);
@@ -423,11 +438,10 @@ private:
     {
         if (pickMode && pickCallback)
         {
-            auto cb = pickCallback;
-            cb (entryId);
-            if (auto* win = findParentComponentOfClass<juce::DocumentWindow>())
-                win->setVisible (false);
-            enterManageMode();
+            // Audition: load into the requesting slot but keep the browser
+            // open, so the player can click through captures and compare.
+            // DONE (or the window's close button) ends the session.
+            pickCallback (entryId);
             return;
         }
         showCardMenu (entryId);
@@ -658,6 +672,7 @@ private:
     juce::ComboBox typeFilter;
     juce::ComboBox tagFilter;
     juce::TextButton importButton { "IMPORT..." };
+    juce::TextButton doneButton { "DONE" };
     juce::Viewport viewport;
     std::unique_ptr<juce::Component> cardHolder;
     juce::OwnedArray<Card> cards;
