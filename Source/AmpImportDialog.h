@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "AmpLibrary.h"
+#include "ImageLoader.h"
 
 /**
  * AmpImportDialog - the card that turns a downloaded file into a library entry.
@@ -105,14 +106,17 @@ private:
                 addAndMakeVisible (l);
             };
 
-            label (summaryLabel, juce::String (rigs) + " capture(s), " + juce::String (irs) + " IR(s)");
+            label (summaryLabel, juce::String (rigs) + " capture(s), " + juce::String (irs)
+                                 + " IR(s) - click a row's square to add its picture");
             addAndMakeVisible (summaryLabel);
+            juce::ignoreUnused (names);
 
-            fileList.setMultiLine (true);
-            fileList.setReadOnly (true);
-            fileList.setScrollbarsShown (true);
-            fileList.setText (names, juce::dontSendNotification);
-            addAndMakeVisible (fileList);
+            rowHolder = std::make_unique<juce::Component>();
+            for (const auto& f : files)
+                rowHolder->addAndMakeVisible (rows.add (new FileRow (f)));
+            rowViewport.setViewedComponent (rowHolder.get(), false);
+            rowViewport.setScrollBarsShown (true, false);
+            addAndMakeVisible (rowViewport);
 
             label (makerLabel, "Maker for all (optional)");
             addAndMakeVisible (makerEditor);
@@ -151,12 +155,111 @@ private:
             setSize (460, 420);
         }
 
+        //======================================================================
+        /** One batch row: picture chip (click to choose / drop an image) plus
+            the filename. */
+        class FileRow : public juce::Component,
+                        public juce::FileDragAndDropTarget
+        {
+        public:
+            explicit FileRow (const juce::File& f) : file (f)
+            {
+                setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            }
+
+            juce::File file, picture;
+
+            void paint (juce::Graphics& g) override
+            {
+                auto chip = getLocalBounds().removeFromLeft (getHeight()).reduced (2).toFloat();
+                g.setColour (juce::Colour (0xff16150f));
+                g.fillRoundedRectangle (chip, 3.0f);
+                g.setColour (picture.existsAsFile() ? juce::Colour (0xff7ec97e)
+                                                    : juce::Colour (0xff45423a));
+                g.drawRoundedRectangle (chip.reduced (0.5f), 3.0f, 1.0f);
+
+                if (thumb.isValid())
+                    g.drawImage (thumb, chip.reduced (2),
+                                 juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
+                else
+                {
+                    // small "+" placeholder
+                    g.setColour (juce::Colour (0xff5a564c));
+                    const float cx = chip.getCentreX(), cy = chip.getCentreY();
+                    g.drawLine (cx - 4, cy, cx + 4, cy, 1.4f);
+                    g.drawLine (cx, cy - 4, cx, cy + 4, 1.4f);
+                }
+
+                g.setColour (juce::Colour (0xffd8d2be));
+                g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+                g.drawFittedText (file.getFileName(),
+                                  getLocalBounds().withTrimmedLeft (getHeight() + 6).reduced (0, 2),
+                                  juce::Justification::centredLeft, 1);
+            }
+
+            void mouseUp (const juce::MouseEvent& e) override
+            {
+                if (! e.mouseWasClicked())
+                    return;
+                auto chooser = std::make_shared<juce::FileChooser> (
+                    "Picture for " + file.getFileNameWithoutExtension(),
+                    juce::File{}, UpStageImages::filePattern());
+                juce::Component::SafePointer<FileRow> safe (this);
+                chooser->launchAsync (juce::FileBrowserComponent::openMode |
+                                      juce::FileBrowserComponent::canSelectFiles,
+                    [safe, chooser] (const juce::FileChooser& fc)
+                    {
+                        if (safe != nullptr)
+                            safe->setPicture (fc.getResult());
+                    });
+            }
+
+            bool isInterestedInFileDrag (const juce::StringArray& fs) override
+            {
+                for (const auto& f : fs)
+                    if (UpStageImages::hasSupportedExtension (f))
+                        return true;
+                return false;
+            }
+
+            void filesDropped (const juce::StringArray& fs, int, int) override
+            {
+                for (const auto& f : fs)
+                    if (UpStageImages::hasSupportedExtension (f)) { setPicture (juce::File (f)); break; }
+            }
+
+            void setPicture (const juce::File& f)
+            {
+                if (! f.existsAsFile())
+                    return;
+                auto img = UpStageImages::load (f);
+                if (img.isValid())
+                {
+                    picture = f;
+                    thumb = img;
+                    repaint();
+                }
+            }
+
+        private:
+            juce::Image thumb;
+        };
+
         void resized() override
         {
             auto area = getLocalBounds().reduced (14, 10);
             summaryLabel.setBounds (area.removeFromTop (18));
             area.removeFromTop (4);
-            fileList.setBounds (area.removeFromTop (100));
+
+            rowViewport.setBounds (area.removeFromTop (120));
+            const int rowW = rowViewport.getWidth() - rowViewport.getScrollBarThickness() - 2;
+            int y = 0;
+            for (auto* row : rows)
+            {
+                row->setBounds (0, y, rowW, 26);
+                y += 28;
+            }
+            rowHolder->setSize (rowW, juce::jmax (y, rowViewport.getHeight()));
             area.removeFromTop (8);
 
             auto makerRow = area.removeFromTop (40);
@@ -213,12 +316,14 @@ private:
 
             int ok = 0;
             juce::StringArray failures;
-            for (const auto& f : files)
+            for (auto* row : rows)
             {
+                const auto& f = row->file;
                 juce::String err;
                 juce::String id;
                 AmpImportInfo info = shared;
                 info.name = f.getFileNameWithoutExtension();
+                info.picture = row->picture;
                 if (f.hasFileExtension ("nam"))
                 {
                     info.category = rigCat;
@@ -259,7 +364,10 @@ private:
         juce::Array<juce::File> files;
         bool hasRigs = false, hasIrs = false;
         juce::Label summaryLabel, makerLabel, urlLabel, tagsLabel, rigTypeLabel, irTypeLabel;
-        juce::TextEditor fileList, makerEditor, urlEditor, tagsEditor;
+        juce::TextEditor makerEditor, urlEditor, tagsEditor;
+        juce::Viewport rowViewport;
+        std::unique_ptr<juce::Component> rowHolder;
+        juce::OwnedArray<FileRow> rows;
         juce::ComboBox rigTypeCombo, irTypeCombo;
         juce::TextButton importButton { "IMPORT ALL" }, cancelButton { "Cancel" };
     };
@@ -438,7 +546,7 @@ private:
             if (! e.mouseWasClicked())
                 return;
             auto chooser = std::make_shared<juce::FileChooser> (
-                "Choose a picture", juce::File{}, "*.png;*.jpg;*.jpeg");
+                "Choose a picture", juce::File{}, UpStageImages::filePattern());
             juce::Component::SafePointer<PictureWell> safe (this);
             chooser->launchAsync (juce::FileBrowserComponent::openMode |
                                   juce::FileBrowserComponent::canSelectFiles,
@@ -452,8 +560,7 @@ private:
         bool isInterestedInFileDrag (const juce::StringArray& files) override
         {
             for (const auto& f : files)
-                if (f.endsWithIgnoreCase (".png") || f.endsWithIgnoreCase (".jpg")
-                    || f.endsWithIgnoreCase (".jpeg"))
+                if (UpStageImages::hasSupportedExtension (f))
                     return true;
             return false;
         }
@@ -461,21 +568,18 @@ private:
         void filesDropped (const juce::StringArray& files, int, int) override
         {
             for (const auto& f : files)
-            {
-                juce::File file (f);
-                if (file.hasFileExtension ("png;jpg;jpeg"))
+                if (UpStageImages::hasSupportedExtension (f))
                 {
-                    setPicture (file);
+                    setPicture (juce::File (f));
                     break;
                 }
-            }
         }
 
         void setPicture (const juce::File& f)
         {
             if (! f.existsAsFile())
                 return;
-            auto img = juce::ImageCache::getFromFile (f);
+            auto img = UpStageImages::load (f);
             if (img.isValid())
             {
                 pictureFile = f;

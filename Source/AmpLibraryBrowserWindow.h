@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "AmpLibrary.h"
 #include "HardwareModuleWindow.h"
+#include "ImageLoader.h"
 
 /**
  * AmpLibraryBrowserWindow - the amp locker.
@@ -151,7 +152,7 @@ private:
               isNamCapture (e.isNamFile()), isA2 (e.isA2())
         {
             if (e.pictureFile.existsAsFile())
-                picture = juce::ImageCache::getFromFile (e.pictureFile);
+                picture = UpStageImages::load (e.pictureFile);
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
         }
 
@@ -555,7 +556,7 @@ private:
             case 3: // set picture
             {
                 auto chooser = std::make_shared<juce::FileChooser> (
-                    "Choose a picture", juce::File{}, "*.png;*.jpg;*.jpeg");
+                    "Choose a picture", juce::File{}, UpStageImages::filePattern());
                 juce::Component::SafePointer<AmpLibraryBrowserContent> safe (this);
                 chooser->launchAsync (juce::FileBrowserComponent::openMode |
                                       juce::FileBrowserComponent::canSelectFiles,

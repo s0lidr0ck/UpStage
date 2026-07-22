@@ -4,6 +4,7 @@
 #include "NamAmpProcessor.h"
 #include "AmpLibrary.h"
 #include "MixerLookAndFeel.h"
+#include "ImageLoader.h"
 
 /**
  * NamAmpEditor - skeuomorphic amp-head faceplate for NamAmpProcessor.
@@ -448,7 +449,7 @@ private:
             {
                 s.pictureSourcePath = picPath;
                 s.picture = picPath.isEmpty() ? juce::Image()
-                                              : juce::ImageCache::getFromFile (juce::File (picPath));
+                                              : UpStageImages::load (juce::File (picPath));
             }
         }
 

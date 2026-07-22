@@ -4,6 +4,7 @@
 #include "NamIrProcessor.h"
 #include "AmpLibrary.h"
 #include "MixerLookAndFeel.h"
+#include "ImageLoader.h"
 
 /**
  * NamIrEditor - compact faceplate for the standalone Cab IR / Space IR rows.
@@ -172,7 +173,7 @@ private:
         {
             pictureSourcePath = picPath;
             picture = picPath.isEmpty() ? juce::Image()
-                                        : juce::ImageCache::getFromFile (juce::File (picPath));
+                                        : UpStageImages::load (juce::File (picPath));
         }
         repaint();
     }

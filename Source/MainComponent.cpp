@@ -18,7 +18,6 @@ static juce::String panText (double v)
 //==============================================================================
 MainComponent::MainComponent() : menuBar (this)
 {
-
     pluginFormatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
 
     DBG ("Plugin formats registered: " + juce::String (pluginFormatManager.getNumFormats()));
