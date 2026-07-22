@@ -111,8 +111,14 @@ public:
         g.drawRoundedRectangle (well.reduced (0.5f), 4.0f, 1.5f);
 
         if (picture.isValid())
-            g.drawImage (picture, well.reduced (3),
-                         juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
+        {
+            juce::Graphics::ScopedSaveState save (g);
+            juce::Path clip;
+            clip.addRoundedRectangle (well.reduced (2.0f), 3.0f);
+            g.reduceClipRegion (clip);
+            g.drawImage (picture, well.reduced (2.0f),
+                         juce::RectanglePlacement::fillDestination);
+        }
         else
         {
             g.setColour (juce::Colour (0xff3a372f));

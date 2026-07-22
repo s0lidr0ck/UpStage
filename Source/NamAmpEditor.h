@@ -391,8 +391,12 @@ private:
 
         if (s.picture.isValid())
         {
-            g.drawImage (s.picture, well.reduced (3),
-                         juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
+            juce::Graphics::ScopedSaveState save (g);
+            juce::Path clip;
+            clip.addRoundedRectangle (well.reduced (2.0f), 3.0f);
+            g.reduceClipRegion (clip);
+            g.drawImage (s.picture, well.reduced (2.0f),
+                         juce::RectanglePlacement::fillDestination);
         }
         else
         {

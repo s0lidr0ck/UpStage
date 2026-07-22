@@ -170,63 +170,66 @@ private:
             g.setColour (hovered ? juce::Colour (0xffd8a740) : juce::Colour (0xff1a1916));
             g.drawRoundedRectangle (b, 5.0f, hovered ? 1.6f : 1.0f);
 
-            // picture area
-            auto pic = getLocalBounds().reduced (6).removeFromTop (getHeight() - 40);
+            // picture fills the card's full width, scaled up and cropped
+            auto pic = getLocalBounds().reduced (5).withTrimmedBottom (46);
             g.setColour (juce::Colour (0xff16150f));
             g.fillRoundedRectangle (pic.toFloat(), 3.0f);
             if (picture.isValid())
-                g.drawImage (picture, pic.toFloat().reduced (2),
-                             juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
+            {
+                juce::Graphics::ScopedSaveState save (g);
+                juce::Path clip;
+                clip.addRoundedRectangle (pic.toFloat(), 3.0f);
+                g.reduceClipRegion (clip);
+                g.drawImage (picture, pic.toFloat(),
+                             juce::RectanglePlacement::fillDestination);
+            }
             else
             {
                 g.setColour (juce::Colour (0xff45423a));
-                g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+                g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
                 g.drawText (kind == AmpLibraryEntry::Kind::rig ? "AMP" : "CAB",
                             pic, juce::Justification::centred);
             }
 
-            // badges
-            int bx = pic.getX() + 3;
-            auto badge = [&g, &bx, pic] (const juce::String& text, juce::Colour col)
+            // badges overlay the picture: category left, A1/A2 right
+            auto badge = [&g] (const juce::String& text, juce::Colour col,
+                               int x, int y, bool rightAlign)
             {
-                auto f = juce::Font (juce::FontOptions().withHeight (9.0f).withStyle ("Bold"));
+                auto f = juce::Font (juce::FontOptions().withHeight (10.0f).withStyle ("Bold"));
                 g.setFont (f);
-                const int w = (int) std::ceil (juce::GlyphArrangement::getStringWidth (f, text)) + 8;
-                juce::Rectangle<int> r (bx, pic.getY() + 3, w, 12);
-                g.setColour (juce::Colours::black.withAlpha (0.65f));
-                g.fillRoundedRectangle (r.toFloat(), 2.5f);
+                const int w = (int) std::ceil (juce::GlyphArrangement::getStringWidth (f, text)) + 10;
+                juce::Rectangle<int> r (rightAlign ? x - w : x, y, w, 14);
+                g.setColour (juce::Colours::black.withAlpha (0.72f));
+                g.fillRoundedRectangle (r.toFloat(), 3.0f);
                 g.setColour (col);
                 g.drawText (text, r, juce::Justification::centred);
-                bx += w + 3;
             };
             badge (AmpLibraryEntry::categoryDisplayName (category).toUpperCase(),
-                   category == AmpLibraryEntry::Category::fullRig ? juce::Colour (0xff7ec97e)
-                 : category == AmpLibraryEntry::Category::pedal   ? juce::Colour (0xff7eb8c9)
-                 : category == AmpLibraryEntry::Category::space   ? juce::Colour (0xffc9a97e)
-                                                                  : juce::Colour (0xffd8a740));
+                   category == AmpLibraryEntry::Category::fullRig ? juce::Colour (0xff8fd98f)
+                 : category == AmpLibraryEntry::Category::pedal   ? juce::Colour (0xff8fc4d9)
+                 : category == AmpLibraryEntry::Category::space   ? juce::Colour (0xffd9b98f)
+                                                                  : juce::Colour (0xffe8b84e),
+                   pic.getX() + 4, pic.getY() + 4, false);
             if (isNamCapture)
                 badge (isA2 ? "A2" : "A1",
-                       isA2 ? juce::Colour (0xff8fd98f) : juce::Colour (0xffd9c48f));
-            for (int i = 0; i < juce::jmin (1, tags.size()); ++i)
-                badge (tags[i].toUpperCase(), juce::Colour (0xffb8b4a5));
+                       isA2 ? juce::Colour (0xff9fe89f) : juce::Colour (0xffe8d49f),
+                       pic.getRight() - 4, pic.getY() + 4, true);
 
-            // name strip: name on top, maker under it
-            auto nameArea = getLocalBounds().reduced (6).removeFromBottom (28);
-            g.setColour (juce::Colour (0xff191813));
-            g.fillRoundedRectangle (nameArea.toFloat(), 3.0f);
-            auto inner = nameArea.reduced (4, 2);
-            g.setColour (juce::Colour (0xffe8e2ce));
-            g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+            // text zone: name (up to 2 lines) + maker
+            auto textArea = getLocalBounds().reduced (7).removeFromBottom (42);
+            g.setColour (juce::Colour (0xfff2ecd8));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
             if (creator.isNotEmpty())
             {
-                g.drawFittedText (name, inner.removeFromTop (13), juce::Justification::centred, 1);
-                g.setColour (juce::Colour (0xff9a9484));
-                g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
-                g.drawFittedText ("by " + creator, inner, juce::Justification::centred, 1);
+                g.drawFittedText (name, textArea.removeFromTop (28),
+                                  juce::Justification::centredTop, 2, 0.8f);
+                g.setColour (juce::Colour (0xffa8a292));
+                g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+                g.drawFittedText ("by " + creator, textArea, juce::Justification::centred, 1);
             }
             else
             {
-                g.drawFittedText (name, inner, juce::Justification::centred, 2);
+                g.drawFittedText (name, textArea, juce::Justification::centred, 3, 0.8f);
             }
         }
 
@@ -371,7 +374,7 @@ private:
     void layoutCards()
     {
         const int w = juce::jmax (100, viewport.getWidth() - viewport.getScrollBarThickness() - 4);
-        const int cardW = 152, cardH = 124, gap = 8;
+        const int cardW = 196, cardH = 168, gap = 10;
         const int perRow = juce::jmax (1, (w - gap) / (cardW + gap));
 
         int y = 4;
@@ -673,7 +676,7 @@ class AmpLibraryBrowserWindow : public HardwareModuleWindow
 {
 public:
     AmpLibraryBrowserWindow()
-        : HardwareModuleWindow ("Amp Locker", new AmpLibraryBrowserContent(), 760, 540)
+        : HardwareModuleWindow ("Amp Locker", new AmpLibraryBrowserContent(), 900, 600)
     {
     }
 
