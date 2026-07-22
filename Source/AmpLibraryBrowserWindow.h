@@ -27,6 +27,16 @@ public:
         searchBox.onTextChange = [this] { rebuild(); };
         addAndMakeVisible (searchBox);
 
+        typeFilter.addItem ("All types", 1);
+        typeFilter.addItem ("Heads", 2);
+        typeFilter.addItem ("Full Rigs", 3);
+        typeFilter.addItem ("Pedals", 4);
+        typeFilter.addItem ("Cabs", 5);
+        typeFilter.addItem ("Spaces", 6);
+        typeFilter.setSelectedId (1, juce::dontSendNotification);
+        typeFilter.onChange = [this] { rebuild(); };
+        addAndMakeVisible (typeFilter);
+
         tagFilter.onChange = [this] { rebuild(); };
         addAndMakeVisible (tagFilter);
 
@@ -105,12 +115,14 @@ public:
         auto area = getLocalBounds().reduced (12, 10);
         auto top = area.removeFromTop (26);
 
-        modeLabel.setBounds (top.removeFromLeft (150));
+        modeLabel.setBounds (top.removeFromLeft (130));
         top.removeFromLeft (8);
         importButton.setBounds (top.removeFromRight (86));
         top.removeFromRight (8);
-        tagFilter.setBounds (top.removeFromRight (140));
-        top.removeFromRight (8);
+        tagFilter.setBounds (top.removeFromRight (120));
+        top.removeFromRight (6);
+        typeFilter.setBounds (top.removeFromRight (100));
+        top.removeFromRight (6);
         searchBox.setBounds (top);
 
         area.removeFromTop (8);
@@ -124,8 +136,8 @@ private:
     {
     public:
         Card (AmpLibraryBrowserContent& o, const AmpLibraryEntry& e)
-            : owner (o), entryId (e.id), kind (e.kind), name (e.name),
-              cabBakedIn (e.cabBakedIn), tags (e.tags)
+            : owner (o), entryId (e.id), kind (e.kind), category (e.category),
+              name (e.name), creator (e.creator), tags (e.tags)
         {
             if (e.pictureFile.existsAsFile())
                 picture = juce::ImageCache::getFromFile (e.pictureFile);
@@ -175,18 +187,32 @@ private:
                 g.drawText (text, r, juce::Justification::centred);
                 bx += w + 3;
             };
-            if (kind == AmpLibraryEntry::Kind::rig && cabBakedIn)
-                badge ("FULL RIG", juce::Colour (0xff7ec97e));
-            for (int i = 0; i < juce::jmin (2, tags.size()); ++i)
+            badge (AmpLibraryEntry::categoryDisplayName (category).toUpperCase(),
+                   category == AmpLibraryEntry::Category::fullRig ? juce::Colour (0xff7ec97e)
+                 : category == AmpLibraryEntry::Category::pedal   ? juce::Colour (0xff7eb8c9)
+                 : category == AmpLibraryEntry::Category::space   ? juce::Colour (0xffc9a97e)
+                                                                  : juce::Colour (0xffd8a740));
+            for (int i = 0; i < juce::jmin (1, tags.size()); ++i)
                 badge (tags[i].toUpperCase(), juce::Colour (0xffb8b4a5));
 
-            // name strip
+            // name strip: name on top, maker under it
             auto nameArea = getLocalBounds().reduced (6).removeFromBottom (28);
             g.setColour (juce::Colour (0xff191813));
             g.fillRoundedRectangle (nameArea.toFloat(), 3.0f);
+            auto inner = nameArea.reduced (4, 2);
             g.setColour (juce::Colour (0xffe8e2ce));
             g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
-            g.drawFittedText (name, nameArea.reduced (4, 2), juce::Justification::centred, 2);
+            if (creator.isNotEmpty())
+            {
+                g.drawFittedText (name, inner.removeFromTop (13), juce::Justification::centred, 1);
+                g.setColour (juce::Colour (0xff9a9484));
+                g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
+                g.drawFittedText ("by " + creator, inner, juce::Justification::centred, 1);
+            }
+            else
+            {
+                g.drawFittedText (name, inner, juce::Justification::centred, 2);
+            }
         }
 
         void mouseEnter (const juce::MouseEvent&) override { hovered = true; repaint(); }
@@ -208,8 +234,8 @@ private:
         AmpLibraryBrowserContent& owner;
         juce::String entryId;
         AmpLibraryEntry::Kind kind;
-        juce::String name;
-        bool cabBakedIn;
+        AmpLibraryEntry::Category category;
+        juce::String name, creator;
         juce::StringArray tags;
         juce::Image picture;
         bool hovered = false;
@@ -237,6 +263,16 @@ private:
     {
         if (pickMode && e.kind != pickKind)
             return false;
+
+        if (typeFilter.getSelectedId() > 1)
+        {
+            static const AmpLibraryEntry::Category comboCats[] = {
+                AmpLibraryEntry::Category::head, AmpLibraryEntry::Category::fullRig,
+                AmpLibraryEntry::Category::pedal, AmpLibraryEntry::Category::cab,
+                AmpLibraryEntry::Category::space };
+            if (e.category != comboCats[typeFilter.getSelectedId() - 2])
+                return false;
+        }
 
         const auto search = searchBox.getText().trim();
         if (search.isNotEmpty())
@@ -283,24 +319,32 @@ private:
         sections.clear();
 
         auto& lib = AmpLibrary::instance();
-        const bool showRigs = ! pickMode || pickKind == AmpLibraryEntry::Kind::rig;
-        const bool showCabs = ! pickMode || pickKind == AmpLibraryEntry::Kind::cab;
 
-        if (showRigs)
+        struct SectionDef { AmpLibraryEntry::Category cat; const char* title; };
+        static const SectionDef defs[] = {
+            { AmpLibraryEntry::Category::head,    "HEADS" },
+            { AmpLibraryEntry::Category::fullRig, "FULL RIGS" },
+            { AmpLibraryEntry::Category::pedal,   "PEDALS" },
+            { AmpLibraryEntry::Category::cab,     "CABINETS" },
+            { AmpLibraryEntry::Category::space,   "SPACES" },
+        };
+
+        for (const auto& def : defs)
         {
-            auto* sec = sections.add (new SectionLabel ("RIGS"));
-            cardHolder->addAndMakeVisible (sec);
+            if (pickMode && AmpLibraryEntry::kindForCategory (def.cat) != pickKind)
+                continue;
+
+            juce::Array<const AmpLibraryEntry*> matching;
             for (const auto* e : lib.getEntries())
-                if (e->kind == AmpLibraryEntry::Kind::rig && matchesFilter (*e))
-                    cardHolder->addAndMakeVisible (cards.add (new Card (*this, *e)));
-        }
-        if (showCabs)
-        {
-            auto* sec = sections.add (new SectionLabel ("CABINETS"));
-            cardHolder->addAndMakeVisible (sec);
-            for (const auto* e : lib.getEntries())
-                if (e->kind == AmpLibraryEntry::Kind::cab && matchesFilter (*e))
-                    cardHolder->addAndMakeVisible (cards.add (new Card (*this, *e)));
+                if (e->category == def.cat && matchesFilter (*e))
+                    matching.add (e);
+
+            if (matching.isEmpty())
+                continue;   // hide empty sections
+
+            cardHolder->addAndMakeVisible (sections.add (new SectionLabel (def.title)));
+            for (const auto* e : matching)
+                cardHolder->addAndMakeVisible (cards.add (new Card (*this, *e)));
         }
 
         layoutCards();
@@ -376,20 +420,40 @@ private:
         const bool isRig = e->kind == AmpLibraryEntry::Kind::rig;
 
         juce::PopupMenu menu;
-        menu.addItem (1, "Rename...");
+        menu.addItem (1, "Edit Details...");           // name / maker / website
         menu.addItem (2, "Edit Tags...");
         menu.addItem (3, "Set Picture...");
+
+        juce::PopupMenu catMenu;
         if (isRig)
         {
-            menu.addItem (4, juce::String (e->cabBakedIn ? "Unmark" : "Mark") + " as Full Rig (cab baked in)");
+            catMenu.addItem (30, "Head", true, e->category == AmpLibraryEntry::Category::head);
+            catMenu.addItem (31, "Full Rig", true, e->category == AmpLibraryEntry::Category::fullRig);
+            catMenu.addItem (32, "Pedal", true, e->category == AmpLibraryEntry::Category::pedal);
+        }
+        else
+        {
+            catMenu.addItem (33, "Cab", true, e->category == AmpLibraryEntry::Category::cab);
+            catMenu.addItem (34, "Space", true, e->category == AmpLibraryEntry::Category::space);
+        }
+        menu.addSubMenu ("Category", catMenu);
+
+        if (isRig)
+        {
             juce::PopupMenu cabMenu;
             cabMenu.addItem (100, "None", true, e->pairedCabId.isEmpty());
             int id = 101;
             for (const auto* cab : AmpLibrary::instance().getEntries())
                 if (cab->kind == AmpLibraryEntry::Kind::cab)
-                    cabMenu.addItem (id++, cab->name, true, e->pairedCabId == cab->id);
+                    cabMenu.addItem (id++, cab->name
+                                             + (cab->category == AmpLibraryEntry::Category::space
+                                                    ? " (space)" : ""),
+                                     true, e->pairedCabId == cab->id);
             menu.addSubMenu ("Pair Cab IR", cabMenu);
         }
+
+        menu.addSeparator();
+        menu.addItem (6, "Open Website", e->url.isNotEmpty());
         menu.addSeparator();
         menu.addItem (5, "Delete...");
 
@@ -412,19 +476,18 @@ private:
 
         switch (result)
         {
-            case 1: // rename
-            case 2: // tags
+            case 1: // edit details: name / maker / website
             {
-                const bool rename = result == 1;
-                auto* w = new juce::AlertWindow (rename ? "Rename" : "Edit Tags",
-                                                 rename ? "New name:" : "Comma-separated tags:",
+                auto* w = new juce::AlertWindow ("Edit Details", "",
                                                  juce::MessageBoxIconType::NoIcon);
-                w->addTextEditor ("text", rename ? entry.name : entry.tags.joinIntoString (", "));
+                w->addTextEditor ("name", entry.name, "Name");
+                w->addTextEditor ("maker", entry.creator, "Maker");
+                w->addTextEditor ("url", entry.url, "Website");
                 w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
                 w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
                 juce::Component::SafePointer<AmpLibraryBrowserContent> safe (this);
                 w->enterModalState (true, juce::ModalCallbackFunction::create (
-                    [safe, w, entryId, rename] (int r)
+                    [safe, w, entryId] (int r)
                     {
                         if (safe != nullptr && r == 1)
                         {
@@ -432,18 +495,39 @@ private:
                             if (const auto* cur = lib2.findById (entryId))
                             {
                                 AmpLibraryEntry updated = *cur;
-                                const auto text = w->getTextEditorContents ("text").trim();
-                                if (rename)
-                                {
-                                    if (text.isNotEmpty())
-                                        updated.name = text;
-                                }
-                                else
-                                {
-                                    updated.tags = juce::StringArray::fromTokens (text, ",", "");
-                                    updated.tags.trim();
-                                    updated.tags.removeEmptyStrings();
-                                }
+                                const auto newName = w->getTextEditorContents ("name").trim();
+                                if (newName.isNotEmpty())
+                                    updated.name = newName;
+                                updated.creator = w->getTextEditorContents ("maker").trim();
+                                updated.url     = w->getTextEditorContents ("url").trim();
+                                lib2.updateEntry (updated);
+                            }
+                        }
+                    }), true);
+                break;
+            }
+
+            case 2: // tags
+            {
+                auto* w = new juce::AlertWindow ("Edit Tags", "Comma-separated tags:",
+                                                 juce::MessageBoxIconType::NoIcon);
+                w->addTextEditor ("text", entry.tags.joinIntoString (", "));
+                w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                juce::Component::SafePointer<AmpLibraryBrowserContent> safe (this);
+                w->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [safe, w, entryId] (int r)
+                    {
+                        if (safe != nullptr && r == 1)
+                        {
+                            auto& lib2 = AmpLibrary::instance();
+                            if (const auto* cur = lib2.findById (entryId))
+                            {
+                                AmpLibraryEntry updated = *cur;
+                                updated.tags = juce::StringArray::fromTokens (
+                                    w->getTextEditorContents ("text"), ",", "");
+                                updated.tags.trim();
+                                updated.tags.removeEmptyStrings();
                                 lib2.updateEntry (updated);
                             }
                         }
@@ -480,10 +564,26 @@ private:
                 break;
             }
 
-            case 4: // toggle cab baked in
-                entry.cabBakedIn = ! entry.cabBakedIn;
+            case 6: // open website
+                if (entry.url.isNotEmpty())
+                {
+                    auto address = entry.url;
+                    if (! address.startsWithIgnoreCase ("http"))
+                        address = "https://" + address;
+                    juce::URL (address).launchInDefaultBrowser();
+                }
+                break;
+
+            case 30: case 31: case 32: case 33: case 34: // category
+            {
+                static const AmpLibraryEntry::Category menuCats[] = {
+                    AmpLibraryEntry::Category::head, AmpLibraryEntry::Category::fullRig,
+                    AmpLibraryEntry::Category::pedal, AmpLibraryEntry::Category::cab,
+                    AmpLibraryEntry::Category::space };
+                entry.category = menuCats[result - 30];
                 lib.updateEntry (entry);
                 break;
+            }
 
             case 5: // delete
             {
@@ -534,6 +634,7 @@ private:
     //==========================================================================
     juce::Label modeLabel;
     juce::TextEditor searchBox;
+    juce::ComboBox typeFilter;
     juce::ComboBox tagFilter;
     juce::TextButton importButton { "IMPORT..." };
     juce::Viewport viewport;

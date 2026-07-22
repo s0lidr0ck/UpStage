@@ -3,6 +3,13 @@
 AmpLibrary& AmpLibrary::instance()
 {
     static AmpLibrary lib;
+    if (! lib.scannedOnce)
+    {
+        // First-access scan so project loads can resolve rig ids even if the
+        // browser window has never been opened this session.
+        lib.scannedOnce = true;
+        lib.rescan();
+    }
     return lib;
 }
 
@@ -42,11 +49,22 @@ void AmpLibrary::rescan()
                                                                                 : AmpLibraryEntry::Kind::rig;
         e->name        = parsed.getProperty ("name", "Unnamed").toString();
         e->creator     = parsed.getProperty ("creator", "").toString();
+        e->url         = parsed.getProperty ("url", "").toString();
         e->notes       = parsed.getProperty ("notes", "").toString();
         e->pairedCabId = parsed.getProperty ("pairedCabId", "").toString();
-        e->cabBakedIn  = (bool) parsed.getProperty ("cabBakedIn", false);
         e->dateAddedMs = (juce::int64) parsed.getProperty ("dateAddedMs", 0);
         e->folder      = dir;
+
+        // Category, migrating pre-taxonomy sidecars: full-rig flag -> Full Rig,
+        // other captures -> Head, IRs -> Cab.
+        const auto catStr = parsed.getProperty ("category", "").toString();
+        if (catStr.isNotEmpty())
+            e->category = AmpLibraryEntry::categoryFromString (catStr, e->kind);
+        else if ((bool) parsed.getProperty ("cabBakedIn", false))
+            e->category = AmpLibraryEntry::Category::fullRig;
+        else
+            e->category = e->kind == AmpLibraryEntry::Kind::cab ? AmpLibraryEntry::Category::cab
+                                                                : AmpLibraryEntry::Category::head;
 
         if (auto* tagArr = parsed.getProperty ("tags", juce::var()).getArray())
             for (const auto& t : *tagArr)
@@ -86,11 +104,12 @@ void AmpLibrary::writeSidecar (const AmpLibraryEntry& e)
     auto* obj = new juce::DynamicObject();
     obj->setProperty ("id",          e.id);
     obj->setProperty ("kind",        kindToString (e.kind));
+    obj->setProperty ("category",    AmpLibraryEntry::categoryToString (e.category));
     obj->setProperty ("name",        e.name);
     obj->setProperty ("creator",     e.creator);
+    obj->setProperty ("url",         e.url);
     obj->setProperty ("notes",       e.notes);
     obj->setProperty ("pairedCabId", e.pairedCabId);
-    obj->setProperty ("cabBakedIn",  e.cabBakedIn);
     obj->setProperty ("dateAddedMs", e.dateAddedMs);
 
     juce::Array<juce::var> tagVars;
@@ -171,9 +190,7 @@ bool AmpLibrary::isA2NamFile (const juce::File& f, juce::String& errorOut)
     return false;
 }
 
-juce::String AmpLibrary::importInternal (AmpLibraryEntry::Kind kind, const juce::File& src,
-                                         const juce::String& name, const juce::File& picture,
-                                         const juce::StringArray& tags, bool cabBakedIn,
+juce::String AmpLibrary::importInternal (const juce::File& src, const AmpImportInfo& info,
                                          const juce::String& pairedCabId, juce::String& errorOut)
 {
     const auto id = juce::Uuid().toString();
@@ -198,23 +215,25 @@ juce::String AmpLibrary::importInternal (AmpLibraryEntry::Kind kind, const juce:
 
     auto e = std::make_unique<AmpLibraryEntry>();
     e->id          = id;
-    e->kind        = kind;
-    e->name        = name.isNotEmpty() ? name : src.getFileNameWithoutExtension();
-    e->tags        = tags;
+    e->category    = info.category;
+    e->kind        = AmpLibraryEntry::kindForCategory (info.category);
+    e->name        = info.name.isNotEmpty() ? info.name : src.getFileNameWithoutExtension();
+    e->creator     = info.creator;
+    e->url         = info.url;
+    e->tags        = info.tags;
     e->folder      = folder;
-    e->cabBakedIn  = cabBakedIn;
     e->pairedCabId = pairedCabId;
     e->dateAddedMs = juce::Time::getCurrentTime().toMilliseconds();
 
-    if (kind == AmpLibraryEntry::Kind::rig)
+    if (e->kind == AmpLibraryEntry::Kind::rig)
         e->namFile = dest;
     else
         e->irFile = dest;
 
-    if (picture.existsAsFile())
+    if (info.picture.existsAsFile())
     {
-        auto picDest = folder.getChildFile ("picture" + picture.getFileExtension());
-        if (picture.copyFileTo (picDest))
+        auto picDest = folder.getChildFile ("picture" + info.picture.getFileExtension());
+        if (info.picture.copyFileTo (picDest))
             e->pictureFile = picDest;
     }
 
@@ -225,29 +244,33 @@ juce::String AmpLibrary::importInternal (AmpLibraryEntry::Kind kind, const juce:
     return raw->id;
 }
 
-juce::String AmpLibrary::importNamFile (const juce::File& src, const juce::String& name,
-                                        const juce::File& picture, const juce::StringArray& tags,
-                                        bool cabBakedIn, const juce::File& pairedIrToImport,
+juce::String AmpLibrary::importNamFile (const juce::File& src, const AmpImportInfo& info,
                                         juce::String& errorOut)
 {
     if (! isA2NamFile (src, errorOut))
         return {};
 
+    AmpImportInfo fixed = info;
+    if (AmpLibraryEntry::kindForCategory (fixed.category) != AmpLibraryEntry::Kind::rig)
+        fixed.category = AmpLibraryEntry::Category::head;
+
     juce::String pairedCabId;
-    if (pairedIrToImport.existsAsFile())
+    if (info.pairedIrToImport.existsAsFile())
     {
-        pairedCabId = importIrFile (pairedIrToImport, pairedIrToImport.getFileNameWithoutExtension(),
-                                    juce::File(), tags, errorOut);
+        AmpImportInfo irInfo;
+        irInfo.name     = info.pairedIrToImport.getFileNameWithoutExtension();
+        irInfo.creator  = info.creator;
+        irInfo.tags     = info.tags;
+        irInfo.category = AmpLibraryEntry::Category::cab;
+        pairedCabId = importIrFile (info.pairedIrToImport, irInfo, errorOut);
         if (pairedCabId.isEmpty())
             return {};
     }
 
-    return importInternal (AmpLibraryEntry::Kind::rig, src, name, picture, tags,
-                           cabBakedIn, pairedCabId, errorOut);
+    return importInternal (src, fixed, pairedCabId, errorOut);
 }
 
-juce::String AmpLibrary::importIrFile (const juce::File& src, const juce::String& name,
-                                       const juce::File& picture, const juce::StringArray& tags,
+juce::String AmpLibrary::importIrFile (const juce::File& src, const AmpImportInfo& info,
                                        juce::String& errorOut)
 {
     juce::AudioFormatManager fm;
@@ -255,12 +278,15 @@ juce::String AmpLibrary::importIrFile (const juce::File& src, const juce::String
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (src));
     if (reader == nullptr)
     {
-        errorOut = src.getFileName() + " isn't a readable audio file - cabinet IRs must be WAV.";
+        errorOut = src.getFileName() + " isn't a readable audio file - cabinet/space IRs must be WAV.";
         return {};
     }
 
-    return importInternal (AmpLibraryEntry::Kind::cab, src, name, picture, tags,
-                           false, {}, errorOut);
+    AmpImportInfo fixed = info;
+    if (AmpLibraryEntry::kindForCategory (fixed.category) != AmpLibraryEntry::Kind::cab)
+        fixed.category = AmpLibraryEntry::Category::cab;
+
+    return importInternal (src, fixed, {}, errorOut);
 }
 
 void AmpLibrary::notifyChanged()
