@@ -3984,6 +3984,9 @@
     <ClInclude Include="..\..\Source\ImageLoader.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\NamMidiHooks.h">
+      <Filter>UpStage\Source</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\AmpLibraryBrowserWindow.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>

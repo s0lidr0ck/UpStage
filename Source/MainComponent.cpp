@@ -2,6 +2,7 @@
 #include "MixerLookAndFeel.h"
 #include "NamAmpProcessor.h"
 #include "NamIrProcessor.h"
+#include "NamMidiHooks.h"
 #include "AmpImportDialog.h"
 #include <windows.h>
 #include <psapi.h>
@@ -51,6 +52,22 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Register MIDI-learnable parameters
     midiLearnManager.addListener (this);
+
+    // NAM editor knobs reach MIDI learn through these hooks (the editors live
+    // in their own windows and don't know the app).
+    NamMidiHooks::beginLearn = [this] (const juce::String& pid, float mn, float mx)
+    {
+        midiLearnManager.registerParameter (pid, mn, mx);
+        midiLearnManager.beginLearning (pid);
+    };
+    NamMidiHooks::clearBinding = [this] (const juce::String& pid)
+    {
+        midiLearnManager.clearBinding (pid);
+    };
+    NamMidiHooks::getCc = [this] (const juce::String& pid)
+    {
+        return midiLearnManager.getCcForParam (pid);
+    };
     midiLearnManager.registerParameter ("loopVolume",  0.0f,  1.0f);
     midiLearnManager.registerParameter ("gateThresh", -80.0f, 0.0f);
     midiLearnManager.registerParameter ("inputTrim",  -24.0f, 24.0f);
@@ -798,7 +815,23 @@ MainComponent::MainComponent() : menuBar (this)
         if (auto xml = juce::parseXML (pluginCacheFile))
         {
             knownPluginList.recreateFromXml (*xml);
-            DBG ("Loaded " + juce::String (knownPluginList.getNumTypes()) + " plugins from cache");
+
+            // UpStage hosts effects only: drop any instruments (VSTi) that an
+            // older scan let into the cache.
+            const auto types = knownPluginList.getTypes();
+            int instrumentsRemoved = 0;
+            for (const auto& t : types)
+                if (t.isInstrument)
+                {
+                    knownPluginList.removeType (t);
+                    ++instrumentsRemoved;
+                }
+            if (instrumentsRemoved > 0)
+                if (auto cleaned = knownPluginList.createXml())
+                    cleaned->writeTo (pluginCacheFile);
+
+            DBG ("Loaded " + juce::String (knownPluginList.getNumTypes()) + " plugins from cache ("
+                 + juce::String (instrumentsRemoved) + " instruments removed)");
         }
         else
         {
@@ -2263,6 +2296,58 @@ void MainComponent::resized()
 }
 
 //==============================================================================
+// MIDI CC -> a NAM row's knob. paramID = "nam:<instanceUid>:<knob>"; the uid
+// addresses the processor instance across all chains, wherever its row sits.
+void MainComponent::applyNamMidiParam (const juce::String& paramID, float value)
+{
+    const auto rest = paramID.fromFirstOccurrenceOf ("nam:", false, false);
+    const auto uid  = rest.upToFirstOccurrenceOf (":", false, false);
+    const auto knob = rest.fromFirstOccurrenceOf (":", false, false);
+    if (uid.isEmpty() || knob.isEmpty())
+        return;
+
+    juce::Array<ChannelStrip*> strips;
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+        strips.add (channels[i].get());
+    strips.add (inputChannel.get());
+
+    for (auto* strip : strips)
+    {
+        if (strip == nullptr)
+            continue;
+
+        for (int slot = 0; slot < strip->getNumPlugins(); ++slot)
+        {
+            if (auto* amp = dynamic_cast<NamAmpProcessor*> (strip->getPlugin (slot)))
+            {
+                if (amp->getInstanceId() != uid)
+                    continue;
+
+                if      (knob == "input")  amp->inputGainDb  = value;
+                else if (knob == "output") amp->outputGainDb = value;
+                else if (knob == "blend")  amp->blend        = value;
+                else if (knob == "panA")   amp->panA         = value;
+                else if (knob == "panB")   amp->panB         = value;
+                else if (knob == "bass")   { amp->bassKnob   = value; amp->toneChanged(); }
+                else if (knob == "mid")    { amp->midKnob    = value; amp->toneChanged(); }
+                else if (knob == "treble") { amp->trebleKnob = value; amp->toneChanged(); }
+                return;
+            }
+
+            if (auto* ir = dynamic_cast<NamIrProcessor*> (strip->getPlugin (slot)))
+            {
+                if (ir->getInstanceId() != uid)
+                    continue;
+
+                if      (knob == "mix")    ir->mix          = value;
+                else if (knob == "output") ir->outputGainDb = value;
+                return;
+            }
+        }
+    }
+}
+
+//==============================================================================
 AmpLibraryBrowserWindow& MainComponent::ensureAmpBrowser()
 {
     if (ampBrowserWindow == nullptr)
@@ -2682,6 +2767,12 @@ void MainComponent::timerCallback()
 //==============================================================================
 void MainComponent::midiLearnParameterChanged (const juce::String& paramID, float value)
 {
+    if (paramID.startsWith ("nam:"))
+    {
+        applyNamMidiParam (paramID, value);
+        return;
+    }
+
     if (paramID == "loopVolume")
     {
         loopVolumeSlider.setValue (value, juce::dontSendNotification);
@@ -3644,22 +3735,23 @@ void MainComponent::scanForPlugins (bool clearCache)
                 scannedFilesFile.deleteFile();
             }
 
-            juce::PluginDirectoryScanner scanner (knownList,
-                                                  *formatManager.getFormat (0),
-                                                  vst3Paths,
-                                                  true,
-                                                  juce::File());
+            // Out-of-process scanning: each plugin file is probed by a child
+            // copy of this exe (--scan-file). A plugin that crashes or hangs
+            // kills only the child; the file is blacklisted and the scan moves
+            // on. Instruments (VSTi) are dropped - UpStage hosts effects only.
+            auto files = vst3Format->searchPathsForPlugins (vst3Paths, true, false);
+            log ("Found " + juce::String (files.size()) + " candidate plugin files");
 
-            juce::String pluginBeingScanned;
+            const auto ourExe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+            auto resultFile = appDataDir.getChildFile ("ScanChildResult.xml");
+
             int newPluginsFound = 0;
             int skippedCount = 0;
+            int instrumentsSkipped = 0;
 
-            while (true)
+            for (int fileIndex = 0; fileIndex < files.size(); ++fileIndex)
             {
-                auto nextFile = scanner.getNextPluginFileThatWillBeScanned();
-
-                if (nextFile.isEmpty())
-                    break;
+                const auto& nextFile = files.getReference (fileIndex);
 
                 if (threadShouldExit())
                 {
@@ -3667,10 +3759,11 @@ void MainComponent::scanForPlugins (bool clearCache)
                     return;
                 }
 
+                setProgress ((double) fileIndex / (double) juce::jmax (1, files.size()));
+
                 // Skip already-scanned files
                 if (alreadyScanned.contains (nextFile))
                 {
-                    scanner.skipNextFile();
                     skippedCount++;
                     continue;
                 }
@@ -3682,7 +3775,6 @@ void MainComponent::scanForPlugins (bool clearCache)
                     if (nextFile.contains (pattern))
                     {
                         setStatusMessage ("Skipping: " + juce::File (nextFile).getFileName());
-                        scanner.skipNextFile();
                         shouldSkip = true;
                         break;
                     }
@@ -3691,40 +3783,78 @@ void MainComponent::scanForPlugins (bool clearCache)
                 if (shouldSkip)
                     continue;
 
-                // Write crash marker BEFORE scanning
+                // Marker stays as a belt-and-braces recovery for the child
+                // machinery itself failing.
                 crashMarkerFile.replaceWithText (nextFile);
 
                 setStatusMessage ("Scanning: " +
                     nextFile.fromLastOccurrenceOf ("/", false, false)
                             .fromLastOccurrenceOf ("\\", false, false));
 
-                int countBefore = knownList.getNumTypes();
-                bool scanResult = scanner.scanNextFile (true, pluginBeingScanned);
+                resultFile.deleteFile();
+                juce::StringArray args { ourExe.getFullPathName(),
+                                         "--scan-file", nextFile,
+                                         "--out", resultFile.getFullPathName() };
 
-                if (! scanResult)
-                    break;
-
-                int countAfter = knownList.getNumTypes();
-                bool pluginWasAdded = countAfter > countBefore;
-
-                // Only mark as scanned if plugin was actually registered
-                if (pluginWasAdded)
+                juce::ChildProcess child;
+                bool childOk = child.start (args);
+                if (childOk && ! child.waitForProcessToFinish (60000))
                 {
-                    if (auto xml = knownList.createXml())
-                        xml->writeTo (pluginCacheFile);
-                    newPluginsFound += (countAfter - countBefore);
+                    child.kill();
+                    childOk = false;
+                    log ("TIMEOUT scanning (blacklisted): " + nextFile);
+                }
+
+                // Judge by the result file, not the exit code: some plugins
+                // (e.g. LANDR) crash on unload AFTER producing valid
+                // descriptions - the data is still good.
+                std::unique_ptr<juce::XmlElement> resultXml;
+                if (resultFile.existsAsFile())
+                    resultXml = juce::XmlDocument::parse (resultFile);
+
+                if (resultXml != nullptr && resultXml->hasTagName ("SCANRESULT"))
+                {
+                    int addedFromFile = 0;
+                    for (auto* pluginXml : resultXml->getChildIterator())
+                    {
+                        juce::PluginDescription desc;
+                        if (! desc.loadFromXml (*pluginXml))
+                            continue;
+                        if (desc.isInstrument)
+                        {
+                            ++instrumentsSkipped;
+                            log ("Skipped instrument (VSTi): " + desc.name);
+                            continue;
+                        }
+                        knownList.addType (desc);
+                        ++addedFromFile;
+                    }
+
+                    if (addedFromFile > 0)
+                    {
+                        if (auto xml = knownList.createXml())
+                            xml->writeTo (pluginCacheFile);
+                        newPluginsFound += addedFromFile;
+                    }
+                    else if (! childOk)
+                        log ("Child died, no usable plugins in: " + nextFile);
                 }
                 else
                 {
-                    auto failedFiles = scanner.getFailedFiles();
-                    for (const auto& f : failedFiles)
-                        log ("Failed to validate: " + f);
+                    // Child crashed or produced nothing: blacklist the file so
+                    // it can never be probed again.
+                    blacklist.add (nextFile);
+                    blacklistFile.appendText (nextFile + "\n");
+                    log ("FAILED/crashed (blacklisted): " + nextFile);
                 }
 
                 scannedFilesFile.appendText (nextFile + "\n");
                 crashMarkerFile.deleteFile();
-                setProgress (scanner.getProgress());
+                resultFile.deleteFile();
             }
+
+            log ("Instruments skipped: " + juce::String (instrumentsSkipped));
+            juce::ignoreUnused (skippedCount);
 
             // Clean up crash marker
             crashMarkerFile.deleteFile();

@@ -5,6 +5,45 @@
 #include "AmpLibrary.h"
 #include "MixerLookAndFeel.h"
 #include "ImageLoader.h"
+#include "NamMidiHooks.h"
+
+/** Rotary that owns its right-click: pops the MIDI-learn menu instead of
+    letting the Slider react to the button. */
+struct NamMidiKnob : public juce::Slider
+{
+    std::function<void()> onRightClick;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+        {
+            if (onRightClick) onRightClick();
+            return;
+        }
+        juce::Slider::mouseDown (e);
+    }
+};
+
+/** Shows the MIDI Learn / Clear menu for a NAM param id. Shared by the amp
+    and IR editors. */
+inline void showNamMidiMenu (const juce::String& paramID, float minV, float maxV)
+{
+    if (! NamMidiHooks::beginLearn)
+        return;
+
+    const int cc = NamMidiHooks::getCc ? NamMidiHooks::getCc (paramID) : -1;
+    juce::PopupMenu m;
+    m.addItem (1, cc >= 0 ? "MIDI Learn (bound to CC " + juce::String (cc) + ")"
+                          : "MIDI Learn");
+    m.addItem (2, "Clear MIDI binding", cc >= 0);
+    m.showMenuAsync ({}, [paramID, minV, maxV] (int r)
+    {
+        if (r == 1 && NamMidiHooks::beginLearn)
+            NamMidiHooks::beginLearn (paramID, minV, maxV);
+        else if (r == 2 && NamMidiHooks::clearBinding)
+            NamMidiHooks::clearBinding (paramID);
+    });
+}
 
 /**
  * NamAmpEditor - skeuomorphic amp-head faceplate for NamAmpProcessor.
@@ -41,16 +80,16 @@ public:
         setupSideUi (0);
         setupSideUi (1);
 
-        setupKnob (inputKnob,  "INPUT",  -24.0, 24.0, 0.0, proc.inputGainDb);
-        setupKnob (bassKnob,   "BASS",     0.0, 10.0, 5.0, proc.bassKnob, true);
-        setupKnob (midKnob,    "MID",      0.0, 10.0, 5.0, proc.midKnob, true);
-        setupKnob (trebleKnob, "TREBLE",   0.0, 10.0, 5.0, proc.trebleKnob, true);
-        setupKnob (outputKnob, "OUTPUT", -24.0, 24.0, 0.0, proc.outputGainDb);
+        setupKnob (inputKnob,  "INPUT",  "input",  -24.0, 24.0, 0.0, proc.inputGainDb);
+        setupKnob (bassKnob,   "BASS",   "bass",     0.0, 10.0, 5.0, proc.bassKnob, true);
+        setupKnob (midKnob,    "MID",    "mid",      0.0, 10.0, 5.0, proc.midKnob, true);
+        setupKnob (trebleKnob, "TREBLE", "treble",   0.0, 10.0, 5.0, proc.trebleKnob, true);
+        setupKnob (outputKnob, "OUTPUT", "output", -24.0, 24.0, 0.0, proc.outputGainDb);
 
-        setupKnob (blendKnob, "BLEND", 0.0, 1.0, 0.5, proc.blend);
-        setupKnob (panAKnob,  "PAN A", -1.0, 1.0, 0.0, proc.panA);
+        setupKnob (blendKnob, "BLEND", "blend", 0.0, 1.0, 0.5, proc.blend);
+        setupKnob (panAKnob,  "PAN A", "panA", -1.0, 1.0, 0.0, proc.panA);
         panAKnob.slider.setComponentID ("amp_panA");     // "pan" triggers the bipolar arc
-        setupKnob (panBKnob,  "PAN B", -1.0, 1.0, 0.0, proc.panB);
+        setupKnob (panBKnob,  "PAN B", "panB", -1.0, 1.0, 0.0, proc.panB);
         panBKnob.slider.setComponentID ("amp_panB");
 
         polarityButton.setClickingTogglesState (true);
@@ -122,9 +161,16 @@ private:
     //==========================================================================
     struct LabelledKnob
     {
-        juce::Slider slider;
-        juce::Label  label;
+        NamMidiKnob slider;
+        juce::Label label;
     };
+
+    struct KnobParam
+    {
+        juce::Slider* slider;
+        std::atomic<float>* target;
+    };
+    std::vector<KnobParam> knobParams;
 
     struct SideUi
     {
@@ -212,7 +258,7 @@ private:
         addAndMakeVisible (s.trimLabel);
     }
 
-    void setupKnob (LabelledKnob& k, const juce::String& name,
+    void setupKnob (LabelledKnob& k, const juce::String& name, const juce::String& midiSuffix,
                     double lo, double hi, double def, std::atomic<float>& target,
                     bool isTone = false)
     {
@@ -227,6 +273,11 @@ private:
             if (isTone)
                 proc.toneChanged();
         };
+        k.slider.onRightClick = [this, midiSuffix, lo, hi]
+        {
+            showNamMidiMenu (proc.midiParamId (midiSuffix), (float) lo, (float) hi);
+        };
+        knobParams.push_back ({ &k.slider, &target });
         addAndMakeVisible (k.slider);
 
         k.label.setText (name, juce::dontSendNotification);
@@ -459,6 +510,13 @@ private:
 
         liteButton.setEnabled (proc.isModelSlimmable (0) || proc.isModelSlimmable (1)
                                || ! (proc.hasModel (0) || proc.hasModel (1)));
+
+        // Follow MIDI-driven changes: move knobs to the processor's values
+        // unless the user is holding one.
+        for (auto& kp : knobParams)
+            if (! kp.slider->isMouseButtonDown())
+                kp.slider->setValue ((double) kp.target->load(), juce::dontSendNotification);
+
         repaint();
     }
 

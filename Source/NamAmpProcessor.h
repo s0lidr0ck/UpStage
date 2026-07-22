@@ -38,6 +38,11 @@ public:
 
     Role getRole() const { return role; }
 
+    /** Stable per-instance id for MIDI-learn param addressing ("nam:<uid>:<knob>").
+        Serialized in the state blob so bindings reconnect after project load. */
+    juce::String getInstanceId() const { return instanceId; }
+    juce::String midiParamId (const juce::String& knob) const { return "nam:" + instanceId + ":" + knob; }
+
     //==========================================================================
     // Rig / cab management. Sides: 0 = A, 1 = B. Message thread only.
     void loadRig (int side, const juce::String& rigId);
@@ -146,6 +151,7 @@ private:
     void applySlimSize (nam::DSP* m) const;
 
     Role role = Role::amp;
+    juce::String instanceId = juce::Uuid().toString();
     Side sides[2];
     juce::SpinLock modelLock;
     juce::ThreadPool loaderPool { 1 };

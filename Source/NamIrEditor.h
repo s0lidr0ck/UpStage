@@ -5,6 +5,7 @@
 #include "AmpLibrary.h"
 #include "MixerLookAndFeel.h"
 #include "ImageLoader.h"
+#include "NamAmpEditor.h"   // NamMidiKnob + showNamMidiMenu
 
 /**
  * NamIrEditor - compact faceplate for the standalone Cab IR / Space IR rows.
@@ -44,7 +45,8 @@ public:
         };
         addAndMakeVisible (browseButton);
 
-        auto setupKnob = [this] (juce::Slider& s, juce::Label& l, const juce::String& name,
+        auto setupKnob = [this] (NamMidiKnob& s, juce::Label& l, const juce::String& name,
+                                 const juce::String& midiSuffix,
                                  double lo, double hi, double def, std::atomic<float>& target)
         {
             s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
@@ -53,6 +55,11 @@ public:
             s.setDoubleClickReturnValue (true, def);
             s.setValue ((double) target.load(), juce::dontSendNotification);
             s.onValueChange = [&s, &target] { target = (float) s.getValue(); };
+            s.onRightClick = [this, midiSuffix, lo, hi]
+            {
+                showNamMidiMenu (proc.midiParamId (midiSuffix), (float) lo, (float) hi);
+            };
+            midiKnobs.push_back ({ &s, &target });
             addAndMakeVisible (s);
 
             l.setText (name, juce::dontSendNotification);
@@ -63,8 +70,8 @@ public:
         };
 
         // MIX on both roles: cabs default fully wet but stay adjustable.
-        setupKnob (mixKnob, mixLabel, "MIX", 0.0, 1.0, space ? 0.3 : 1.0, proc.mix);
-        setupKnob (outKnob, outLabel, "OUTPUT", -24.0, 24.0, 0.0, proc.outputGainDb);
+        setupKnob (mixKnob, mixLabel, "MIX", "mix", 0.0, 1.0, space ? 0.3 : 1.0, proc.mix);
+        setupKnob (outKnob, outLabel, "OUTPUT", "output", -24.0, 24.0, 0.0, proc.outputGainDb);
 
         proc.onEngineStateChanged = [safe = juce::Component::SafePointer<NamIrEditor> (this)]
         {
@@ -181,6 +188,12 @@ private:
             picture = picPath.isEmpty() ? juce::Image()
                                         : UpStageImages::load (juce::File (picPath));
         }
+
+        // Follow MIDI-driven changes unless the user is holding a knob.
+        for (auto& kp : midiKnobs)
+            if (! kp.first->isMouseButtonDown())
+                kp.first->setValue ((double) kp.second->load(), juce::dontSendNotification);
+
         repaint();
     }
 
@@ -190,7 +203,8 @@ private:
     MixerLookAndFeel lnf;
     juce::Label titleLabel, nameStrip, mixLabel, outLabel;
     juce::TextButton browseButton { "BROWSE..." };
-    juce::Slider mixKnob, outKnob;
+    NamMidiKnob mixKnob, outKnob;
+    std::vector<std::pair<juce::Slider*, std::atomic<float>*>> midiKnobs;
     juce::Rectangle<int> pictureWell;
     juce::Image picture;
     juce::String pictureSourcePath;

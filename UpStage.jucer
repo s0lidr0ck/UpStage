@@ -139,6 +139,8 @@
             file="Source/NamIrEditor.h"/>
       <FILE id="ImageLoaderH" name="ImageLoader.h" compile="0" resource="0"
             file="Source/ImageLoader.h"/>
+      <FILE id="NamMidiHooksH" name="NamMidiHooks.h" compile="0" resource="0"
+            file="Source/NamMidiHooks.h"/>
       <FILE id="AmpBrowserWinH" name="AmpLibraryBrowserWindow.h" compile="0"
             resource="0" file="Source/AmpLibraryBrowserWindow.h"/>
       <FILE id="AmpImportDlgH" name="AmpImportDialog.h" compile="0" resource="0"

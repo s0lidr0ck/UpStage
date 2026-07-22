@@ -353,6 +353,7 @@ private:
     std::unique_ptr<AmpLibraryBrowserWindow> ampBrowserWindow;
     juce::TextButton ampsButton { "AMPS" };
     AmpLibraryBrowserWindow& ensureAmpBrowser();
+    void applyNamMidiParam (const juce::String& paramID, float value);
 
     // MIDI activity LED + monitor
     juce::Label midiLedLabel;

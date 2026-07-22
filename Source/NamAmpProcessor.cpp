@@ -411,6 +411,7 @@ bool NamAmpProcessor::hasEditor() const { return true; }
 void NamAmpProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::XmlElement xml ("NamAmp");
+    xml.setAttribute ("uid",          instanceId);
     xml.setAttribute ("role",         role == Role::pedal ? "pedal" : "amp");
     xml.setAttribute ("dual",         dualMode.load() ? 1 : 0);
     xml.setAttribute ("inputGainDb",  (double) inputGainDb.load());
@@ -443,6 +444,8 @@ void NamAmpProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (xml == nullptr || ! xml->hasTagName ("NamAmp"))
         return;
 
+    if (xml->hasAttribute ("uid"))
+        instanceId = xml->getStringAttribute ("uid");
     role          = xml->getStringAttribute ("role", "amp") == "pedal" ? Role::pedal : Role::amp;
     dualMode      = xml->getIntAttribute ("dual") != 0;
     inputGainDb   = (float) xml->getDoubleAttribute ("inputGainDb", 0.0);

@@ -10,13 +10,58 @@ public:
 
     const juce::String getApplicationName() override    { return "UpStage"; }
     const juce::String getApplicationVersion() override { return "0.5.0"; }
-    bool moreThanOneInstanceAllowed() override          { return false; }
 
-    void initialise (const juce::String&) override
+    // The out-of-process plugin scanner launches this same exe with
+    // --scan-file; those children must be allowed to coexist with the app.
+    bool moreThanOneInstanceAllowed() override
     {
+        return getCommandLineParameters().contains ("--scan-file");
+    }
+
+    void initialise (const juce::String& commandLine) override
+    {
+        if (commandLine.contains ("--scan-file"))
+        {
+            runHeadlessScan (commandLine);
+            return;
+        }
+
         // Use JUCE LookAndFeel_V4 with dark theme
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         mainWindow.reset (new MainWindow (getApplicationName()));
+    }
+
+    /** Child-process mode: scan ONE plugin file and write the resulting
+        descriptions as XML. If the plugin crashes, only this process dies -
+        the main app sees a dead child and blacklists the file. */
+    void runHeadlessScan (const juce::String& commandLine)
+    {
+        auto tokens = juce::StringArray::fromTokens (commandLine, true);
+        tokens.trim();
+        juce::String pluginPath, outPath;
+        for (int i = 0; i < tokens.size() - 1; ++i)
+        {
+            if (tokens[i] == "--scan-file") pluginPath = tokens[i + 1].unquoted();
+            if (tokens[i] == "--out")       outPath    = tokens[i + 1].unquoted();
+        }
+
+        int returnValue = 1;
+        if (pluginPath.isNotEmpty() && outPath.isNotEmpty())
+        {
+            juce::VST3PluginFormat format;
+            juce::OwnedArray<juce::PluginDescription> found;
+            format.findAllTypesForFile (found, pluginPath);
+
+            juce::XmlElement root ("SCANRESULT");
+            for (auto* d : found)
+                root.addChildElement (d->createXml().release());
+
+            if (root.writeTo (juce::File (outPath)))
+                returnValue = 0;
+        }
+
+        setApplicationReturnValue (returnValue);
+        quit();
     }
 
     void shutdown() override

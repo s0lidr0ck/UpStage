@@ -28,6 +28,10 @@ public:
 
     Role getRole() const { return role; }
 
+    /** Stable per-instance id for MIDI-learn param addressing (see NamMidiHooks). */
+    juce::String getInstanceId() const { return instanceId; }
+    juce::String midiParamId (const juce::String& knob) const { return "nam:" + instanceId + ":" + knob; }
+
     //==========================================================================
     void setIr (const juce::String& entryId);         // message thread
 
@@ -64,6 +68,7 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override
     {
         juce::XmlElement xml ("NamIr");
+        xml.setAttribute ("uid", instanceId);
         xml.setAttribute ("role", role == Role::space ? "space" : "cab");
         xml.setAttribute ("irId", irId);
         xml.setAttribute ("mix", (double) mix.load());
@@ -76,6 +81,8 @@ public:
         auto xml = getXmlFromBinary (data, sizeInBytes);
         if (xml == nullptr || ! xml->hasTagName ("NamIr"))
             return;
+        if (xml->hasAttribute ("uid"))
+            instanceId = xml->getStringAttribute ("uid");
         role = xml->getStringAttribute ("role", "cab") == "space" ? Role::space : Role::cab;
         mix = (float) xml->getDoubleAttribute ("mix", role == Role::space ? 0.3 : 1.0);
         outputGainDb = (float) xml->getDoubleAttribute ("outputGainDb", 0.0);
@@ -101,6 +108,7 @@ public:
 
 private:
     Role role;
+    juce::String instanceId = juce::Uuid().toString();
     juce::String irId, irName;                  // message thread
     std::atomic<bool> irLoaded { false };       // wav convolution path live
     std::atomic<bool> missing  { false };
