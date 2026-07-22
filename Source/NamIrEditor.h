@@ -61,11 +61,9 @@ public:
             addAndMakeVisible (l);
         };
 
+        // MIX on both roles: cabs default fully wet but stay adjustable.
         setupKnob (mixKnob, mixLabel, "MIX", 0.0, 1.0, space ? 0.3 : 1.0, proc.mix);
         setupKnob (outKnob, outLabel, "OUTPUT", -24.0, 24.0, 0.0, proc.outputGainDb);
-        // Cabs run fully wet by design; the MIX knob only makes sense on spaces.
-        mixKnob.setVisible (space);
-        mixLabel.setVisible (space);
 
         proc.onEngineStateChanged = [safe = juce::Component::SafePointer<NamIrEditor> (this)]
         {

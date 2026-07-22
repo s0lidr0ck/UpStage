@@ -17,8 +17,9 @@ struct AmpLibraryEntry
     enum class Category { head, fullRig, pedal, cab, space };
 
     juce::String id;                 // Uuid string, stable forever
-    Kind         kind = Kind::rig;
+    Kind         kind = Kind::rig;   // storage: rig = .nam capture, cab = IR wav
     Category     category = Category::head;
+    juce::String namVersion;         // .nam file format version ("0.5.2", "0.7.0", ...)
     juce::String name, creator, notes;
     juce::String url;                // maker / capture web page (optional)
     juce::StringArray tags;
@@ -30,10 +31,11 @@ struct AmpLibraryEntry
     juce::int64  dateAddedMs = 0;
 
     bool isFullRig() const { return category == Category::fullRig; }
-
-    static Kind kindForCategory (Category c)
+    bool isNamFile() const { return namFile != juce::File(); }
+    bool isA2() const
     {
-        return (c == Category::cab || c == Category::space) ? Kind::cab : Kind::rig;
+        auto parts = juce::StringArray::fromTokens (namVersion, ".", "");
+        return parts.size() >= 2 && (parts[0].getIntValue() > 0 || parts[1].getIntValue() >= 7);
     }
 
     static juce::String categoryToString (Category c)
@@ -115,30 +117,36 @@ public:
     juce::String importIrFile (const juce::File& src, const AmpImportInfo& info,
                                juce::String& errorOut);
 
-    /** A2-only gate. Parses the .nam JSON and accepts file format >= 0.7.0
-        (the A2 generation). Sets a user-facing message on rejection. */
-    static bool isA2NamFile (const juce::File& f, juce::String& errorOut);
+    /** Capture gate. Parses the .nam JSON and accepts any file-format version
+        the embedded NAM engine supports (0.5.0 through 0.7.x - both A1 and A2
+        generations). versionOut receives the file's version string. Sets a
+        user-facing message on rejection. */
+    static bool isSupportedNamFile (const juce::File& f, juce::String& versionOut,
+                                    juce::String& errorOut);
 
     /** Fired on the message thread after any import / update / delete / rescan. */
     std::function<void()> onLibraryChanged;
 
     /** Rendezvous used by amp/IR editors to ask the app to show the browser in
-        pick mode, filtered to the given categories. MainComponent installs the
-        handler at startup. */
-    std::function<void (juce::Array<AmpLibraryEntry::Category>,
+        pick mode, filtered to the given categories. wavIrOnly additionally
+        restricts to wav-backed entries (the amp row's built-in cab stage is a
+        convolver and can't run .nam cab captures - the standalone Cab IR row
+        can). MainComponent installs the handler at startup. */
+    std::function<void (juce::Array<AmpLibraryEntry::Category>, bool /*wavIrOnly*/,
                         std::function<void (juce::String /*entryId*/)>)> onPickRequested;
 
     void requestPick (juce::Array<AmpLibraryEntry::Category> categories,
-                      std::function<void (juce::String)> cb)
+                      std::function<void (juce::String)> cb, bool wavIrOnly = false)
     {
         if (onPickRequested)
-            onPickRequested (std::move (categories), std::move (cb));
+            onPickRequested (std::move (categories), wavIrOnly, std::move (cb));
     }
 
 private:
     AmpLibrary() = default;
 
     juce::String importInternal (const juce::File& src, const AmpImportInfo& info,
+                                 AmpLibraryEntry::Kind storageKind, const juce::String& namVersion,
                                  const juce::String& pairedCabId, juce::String& errorOut);
     void writeSidecar (const AmpLibraryEntry& e);
     void notifyChanged();

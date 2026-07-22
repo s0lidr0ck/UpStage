@@ -86,21 +86,22 @@ public:
         rebuild();
     }
 
-    void enterPickMode (juce::Array<AmpLibraryEntry::Category> categories,
+    void enterPickMode (juce::Array<AmpLibraryEntry::Category> categories, bool wavIrOnly,
                         std::function<void (juce::String)> cb)
     {
         pickMode = true;
         pickCategories = std::move (categories);
+        pickWavIrOnly = wavIrOnly;
         pickCallback = std::move (cb);
 
         juce::String title;
+        const bool irish = ! pickCategories.isEmpty()
+                           && (pickCategories[0] == AmpLibraryEntry::Category::cab
+                               || pickCategories[0] == AmpLibraryEntry::Category::space);
         if (pickCategories.size() == 1)
             title = "PICK: " + AmpLibraryEntry::categoryDisplayName (pickCategories[0]).toUpperCase();
-        else if (! pickCategories.isEmpty()
-                 && AmpLibraryEntry::kindForCategory (pickCategories[0]) == AmpLibraryEntry::Kind::cab)
-            title = "PICK AN IR";
         else
-            title = "PICK A RIG";
+            title = irish ? "PICK A CAB / SPACE" : "PICK A RIG";
         modeLabel.setText (title, juce::dontSendNotification);
         rebuild();
     }
@@ -146,7 +147,8 @@ private:
     public:
         Card (AmpLibraryBrowserContent& o, const AmpLibraryEntry& e)
             : owner (o), entryId (e.id), kind (e.kind), category (e.category),
-              name (e.name), creator (e.creator), tags (e.tags)
+              name (e.name), creator (e.creator), tags (e.tags),
+              isNamCapture (e.isNamFile()), isA2 (e.isA2())
         {
             if (e.pictureFile.existsAsFile())
                 picture = juce::ImageCache::getFromFile (e.pictureFile);
@@ -201,6 +203,9 @@ private:
                  : category == AmpLibraryEntry::Category::pedal   ? juce::Colour (0xff7eb8c9)
                  : category == AmpLibraryEntry::Category::space   ? juce::Colour (0xffc9a97e)
                                                                   : juce::Colour (0xffd8a740));
+            if (isNamCapture)
+                badge (isA2 ? "A2" : "A1",
+                       isA2 ? juce::Colour (0xff8fd98f) : juce::Colour (0xffd9c48f));
             for (int i = 0; i < juce::jmin (1, tags.size()); ++i)
                 badge (tags[i].toUpperCase(), juce::Colour (0xffb8b4a5));
 
@@ -246,6 +251,7 @@ private:
         AmpLibraryEntry::Category category;
         juce::String name, creator;
         juce::StringArray tags;
+        bool isNamCapture, isA2;
         juce::Image picture;
         bool hovered = false;
     };
@@ -271,6 +277,8 @@ private:
     bool matchesFilter (const AmpLibraryEntry& e) const
     {
         if (pickMode && ! pickCategories.contains (e.category))
+            return false;
+        if (pickMode && pickWavIrOnly && ! e.irFile.existsAsFile())
             return false;
 
         if (typeFilter.getSelectedId() > 1)
@@ -652,6 +660,7 @@ private:
     juce::OwnedArray<SectionLabel> sections;
 
     bool pickMode = false;
+    bool pickWavIrOnly = false;
     juce::Array<AmpLibraryEntry::Category> pickCategories;
     std::function<void (juce::String)> pickCallback;
 

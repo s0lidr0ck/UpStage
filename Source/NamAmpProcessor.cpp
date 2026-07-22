@@ -1,9 +1,5 @@
 #include "NamAmpProcessor.h"
 #include "NamAmpEditor.h"
-#include "NamIrProcessor.h"
-#include "NamIrEditor.h"
-
-juce::AudioProcessorEditor* NamIrProcessor::createEditor() { return new NamIrEditor (*this); }
 
 #include "NAM/dsp.h"
 #include "NAM/get_dsp.h"

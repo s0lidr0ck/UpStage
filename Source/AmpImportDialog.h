@@ -41,11 +41,11 @@ public:
 
         const bool isRig = sourceFile.hasFileExtension ("nam");
 
-        // Fast-fail A1 models before showing any UI.
+        // Fast-fail unreadable / too-old models before showing any UI.
         if (isRig)
         {
-            juce::String err;
-            if (! AmpLibrary::isA2NamFile (sourceFile, err))
+            juce::String err, version;
+            if (! AmpLibrary::isSupportedNamFile (sourceFile, version, err))
             {
                 auto done = onDone;
                 juce::AlertWindow::showAsync (
@@ -130,6 +130,7 @@ private:
                 rigTypeCombo.addItem ("Heads", 1);
                 rigTypeCombo.addItem ("Full Rigs (cab baked in)", 2);
                 rigTypeCombo.addItem ("Pedals", 3);
+                rigTypeCombo.addItem ("Cabs (NAM cab captures)", 4);
                 rigTypeCombo.setSelectedId (1, juce::dontSendNotification);
                 addAndMakeVisible (rigTypeCombo);
             }
@@ -205,6 +206,7 @@ private:
 
             const auto rigCat = rigTypeCombo.getSelectedId() == 2 ? AmpLibraryEntry::Category::fullRig
                               : rigTypeCombo.getSelectedId() == 3 ? AmpLibraryEntry::Category::pedal
+                              : rigTypeCombo.getSelectedId() == 4 ? AmpLibraryEntry::Category::cab
                                                                   : AmpLibraryEntry::Category::head;
             const auto irCat  = irTypeCombo.getSelectedId() == 2 ? AmpLibraryEntry::Category::space
                                                                  : AmpLibraryEntry::Category::cab;
@@ -272,8 +274,8 @@ private:
         {
             if (f.hasFileExtension ("nam"))
             {
-                juce::String err;
-                if (! AmpLibrary::isA2NamFile (f, err))
+                juce::String err, version;
+                if (! AmpLibrary::isSupportedNamFile (f, version, err))
                 {
                     rejected.add (f.getFileName() + ": " + err);
                     continue;
@@ -351,6 +353,7 @@ private:
             categoryCombo.addItem ("Head (amp capture)", 1);
             categoryCombo.addItem ("Full Rig (cab baked in)", 2);
             categoryCombo.addItem ("Pedal", 3);
+            categoryCombo.addItem ("Cab (NAM cab capture)", 6);
         }
         else
         {
@@ -528,6 +531,7 @@ private:
             case 3:  return AmpLibraryEntry::Category::pedal;
             case 4:  return AmpLibraryEntry::Category::cab;
             case 5:  return AmpLibraryEntry::Category::space;
+            case 6:  return AmpLibraryEntry::Category::cab;      // NAM cab capture
             default: return AmpLibraryEntry::Category::head;
         }
     }

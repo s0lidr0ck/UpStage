@@ -18,6 +18,7 @@ static juce::String panText (double v)
 //==============================================================================
 MainComponent::MainComponent() : menuBar (this)
 {
+
     pluginFormatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
 
     DBG ("Plugin formats registered: " + juce::String (pluginFormatManager.getNumFormats()));
@@ -84,11 +85,11 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Amp editors ask for the browser through this rendezvous.
     AmpLibrary::instance().onPickRequested =
-        [this] (juce::Array<AmpLibraryEntry::Category> categories,
+        [this] (juce::Array<AmpLibraryEntry::Category> categories, bool wavIrOnly,
                 std::function<void (juce::String)> cb)
     {
         auto& win = ensureAmpBrowser();
-        win.getContent().enterPickMode (std::move (categories), std::move (cb));
+        win.getContent().enterPickMode (std::move (categories), wavIrOnly, std::move (cb));
         win.setVisible (true);
         win.toFront (true);
     };

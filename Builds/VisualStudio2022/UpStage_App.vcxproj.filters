@@ -781,6 +781,9 @@
     <ClCompile Include="..\..\Source\NamAmpProcessor.cpp">
       <Filter>UpStage\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\NamIrProcessor.cpp">
+      <Filter>UpStage\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\ThirdParty\NeuralAmpModelerCore\NAM\activations.cpp">
       <Filter>UpStage\ThirdParty-NAM</Filter>
     </ClCompile>

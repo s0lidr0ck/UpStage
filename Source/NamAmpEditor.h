@@ -179,13 +179,16 @@ private:
         s.browseCab.onClick = [this, i]
         {
             juce::Component::SafePointer<NamAmpEditor> safe (this);
+            // wav-backed only: this built-in cab stage is a convolver. NAM cab
+            // captures load in the standalone Cab IR row instead.
             AmpLibrary::instance().requestPick ({ AmpLibraryEntry::Category::cab,
                                                   AmpLibraryEntry::Category::space },
                 [safe, i] (juce::String id)
                 {
                     if (safe != nullptr)
                         safe->proc.setCab (i, id);
-                });
+                },
+                true /*wavIrOnly*/);
         };
         addAndMakeVisible (s.browseCab);
 

@@ -77,6 +77,16 @@ void AmpLibrary::rescan()
         if (irName.isNotEmpty())  e->irFile      = dir.getChildFile (irName);
         if (picName.isNotEmpty()) e->pictureFile = dir.getChildFile (picName);
 
+        // Version, migrating entries imported before it was recorded.
+        e->namVersion = parsed.getProperty ("namVersion", "").toString();
+        if (e->namVersion.isEmpty() && e->namFile.existsAsFile())
+        {
+            auto modelJson = juce::JSON::parse (e->namFile.loadFileAsString());
+            e->namVersion = modelJson.getProperty ("version", "").toString();
+            if (e->namVersion.isNotEmpty())
+                writeSidecar (*e);
+        }
+
         entries.add (e.release());
     }
 
@@ -105,6 +115,7 @@ void AmpLibrary::writeSidecar (const AmpLibraryEntry& e)
     obj->setProperty ("id",          e.id);
     obj->setProperty ("kind",        kindToString (e.kind));
     obj->setProperty ("category",    AmpLibraryEntry::categoryToString (e.category));
+    obj->setProperty ("namVersion",  e.namVersion);
     obj->setProperty ("name",        e.name);
     obj->setProperty ("creator",     e.creator);
     obj->setProperty ("url",         e.url);
@@ -155,7 +166,8 @@ bool AmpLibrary::deleteEntry (const juce::String& id)
     return false;
 }
 
-bool AmpLibrary::isA2NamFile (const juce::File& f, juce::String& errorOut)
+bool AmpLibrary::isSupportedNamFile (const juce::File& f, juce::String& versionOut,
+                                     juce::String& errorOut)
 {
     if (! f.existsAsFile())
     {
@@ -178,19 +190,23 @@ bool AmpLibrary::isA2NamFile (const juce::File& f, juce::String& errorOut)
         return false;
     }
 
+    versionOut = versionStr;
     const int major = parts[0].getIntValue();
     const int minor = parts[1].getIntValue();
 
-    // A2-generation captures are NAM file format 0.7.0+; 0.5.x / 0.6.x are A1-era.
-    if (major > 0 || minor >= 7)
+    // The embedded NAM engine supports file formats 0.5.0 (A1 era) through
+    // 0.7.x (A2). Anything older needs re-training on tone3000.com.
+    if (major > 0 || minor >= 5)
         return true;
 
-    errorOut = "This is an A1-era NAM model (file version " + versionStr
-             + "). UpStage supports A2 models only - look for the A2 badge on tone3000.com.";
+    errorOut = "This NAM model uses file format " + versionStr
+             + ", which is too old for the embedded engine (0.5.0+ required). "
+               "Re-download or re-train it on tone3000.com.";
     return false;
 }
 
 juce::String AmpLibrary::importInternal (const juce::File& src, const AmpImportInfo& info,
+                                         AmpLibraryEntry::Kind storageKind, const juce::String& namVersion,
                                          const juce::String& pairedCabId, juce::String& errorOut)
 {
     const auto id = juce::Uuid().toString();
@@ -216,7 +232,8 @@ juce::String AmpLibrary::importInternal (const juce::File& src, const AmpImportI
     auto e = std::make_unique<AmpLibraryEntry>();
     e->id          = id;
     e->category    = info.category;
-    e->kind        = AmpLibraryEntry::kindForCategory (info.category);
+    e->kind        = storageKind;
+    e->namVersion  = namVersion;
     e->name        = info.name.isNotEmpty() ? info.name : src.getFileNameWithoutExtension();
     e->creator     = info.creator;
     e->url         = info.url;
@@ -247,12 +264,15 @@ juce::String AmpLibrary::importInternal (const juce::File& src, const AmpImportI
 juce::String AmpLibrary::importNamFile (const juce::File& src, const AmpImportInfo& info,
                                         juce::String& errorOut)
 {
-    if (! isA2NamFile (src, errorOut))
+    juce::String version;
+    if (! isSupportedNamFile (src, version, errorOut))
         return {};
 
+    // A .nam capture can be a head, full rig, pedal, or cab (NAM cab capture);
+    // spaces are IR wavs only.
     AmpImportInfo fixed = info;
-    if (AmpLibraryEntry::kindForCategory (fixed.category) != AmpLibraryEntry::Kind::rig)
-        fixed.category = AmpLibraryEntry::Category::head;
+    if (fixed.category == AmpLibraryEntry::Category::space)
+        fixed.category = AmpLibraryEntry::Category::cab;
 
     juce::String pairedCabId;
     if (info.pairedIrToImport.existsAsFile())
@@ -267,7 +287,7 @@ juce::String AmpLibrary::importNamFile (const juce::File& src, const AmpImportIn
             return {};
     }
 
-    return importInternal (src, fixed, pairedCabId, errorOut);
+    return importInternal (src, fixed, AmpLibraryEntry::Kind::rig, version, pairedCabId, errorOut);
 }
 
 juce::String AmpLibrary::importIrFile (const juce::File& src, const AmpImportInfo& info,
@@ -283,10 +303,11 @@ juce::String AmpLibrary::importIrFile (const juce::File& src, const AmpImportInf
     }
 
     AmpImportInfo fixed = info;
-    if (AmpLibraryEntry::kindForCategory (fixed.category) != AmpLibraryEntry::Kind::cab)
+    if (fixed.category != AmpLibraryEntry::Category::cab
+        && fixed.category != AmpLibraryEntry::Category::space)
         fixed.category = AmpLibraryEntry::Category::cab;
 
-    return importInternal (src, fixed, {}, errorOut);
+    return importInternal (src, fixed, AmpLibraryEntry::Kind::cab, {}, {}, errorOut);
 }
 
 void AmpLibrary::notifyChanged()
