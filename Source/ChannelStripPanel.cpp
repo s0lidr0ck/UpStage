@@ -327,7 +327,11 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
         if (clipboardHasData)
             menu.addItem (11, "Paste");
         menu.addItem (12, "Add Plugin...");
+        menu.addSeparator();
         menu.addItem (13, "Add NAM Amp");
+        menu.addItem (14, "Add NAM Pedal");
+        menu.addItem (15, "Add Cab IR");
+        menu.addItem (16, "Add Space IR");
     }
 
     menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
@@ -421,8 +425,8 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                 if (onAddPluginClicked) onAddPluginClicked();
                 break;
 
-            case 13:
-                if (onAddAmpClicked) onAddAmpClicked();
+            case 13: case 14: case 15: case 16:
+                if (onAddInternalRow) onAddInternalRow (result - 13);
                 break;
 
             case 20: case 21: case 22: case 23: case 24: case 25: case 26: case 27:

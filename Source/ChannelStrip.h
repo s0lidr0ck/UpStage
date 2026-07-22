@@ -33,10 +33,17 @@ public:
     bool addPlugin (const juce::PluginDescription& desc,
                     std::function<void(bool success)> callback);
 
-    /** Append an internal NAM amp row. Appends via the message queue (same
-        FIFO the async VST3 loads use) so chain order is preserved when
-        projects restore mixed VST3/amp chains. */
-    void addAmp (std::function<void(bool success)> callback = nullptr);
+    /** Append an internal NAM row. Appends via the message queue (same FIFO
+        the async VST3 loads use) so chain order is preserved when projects
+        restore mixed chains. Kinds: 0 = amp head, 1 = pedal, 2 = cab IR,
+        3 = space IR. */
+    void addInternalRow (int kind, std::function<void(bool success)> callback = nullptr);
+
+    /** Convenience: addInternalRow (0). Kept for the existing call sites. */
+    void addAmp (std::function<void(bool success)> callback = nullptr)
+    {
+        addInternalRow (0, std::move (callback));
+    }
 
     /** Remove plugin at position in chain. */
     void removePlugin (int chainIndex);

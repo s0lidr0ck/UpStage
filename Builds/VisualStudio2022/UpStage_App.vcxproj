@@ -3077,6 +3077,8 @@
     <ClInclude Include="..\..\Source\AmpLibrary.h"/>
     <ClInclude Include="..\..\Source\NamAmpProcessor.h"/>
     <ClInclude Include="..\..\Source\NamAmpEditor.h"/>
+    <ClInclude Include="..\..\Source\NamIrProcessor.h"/>
+    <ClInclude Include="..\..\Source\NamIrEditor.h"/>
     <ClInclude Include="..\..\Source\AmpLibraryBrowserWindow.h"/>
     <ClInclude Include="..\..\Source\AmpImportDialog.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>

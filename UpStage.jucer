@@ -131,6 +131,10 @@
             file="Source/NamAmpProcessor.cpp"/>
       <FILE id="NamAmpEditorH" name="NamAmpEditor.h" compile="0" resource="0"
             file="Source/NamAmpEditor.h"/>
+      <FILE id="NamIrProcH" name="NamIrProcessor.h" compile="0" resource="0"
+            file="Source/NamIrProcessor.h"/>
+      <FILE id="NamIrEditorH" name="NamIrEditor.h" compile="0" resource="0"
+            file="Source/NamIrEditor.h"/>
       <FILE id="AmpBrowserWinH" name="AmpLibraryBrowserWindow.h" compile="0"
             resource="0" file="Source/AmpLibraryBrowserWindow.h"/>
       <FILE id="AmpImportDlgH" name="AmpImportDialog.h" compile="0" resource="0"

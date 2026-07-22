@@ -122,15 +122,17 @@ public:
     /** Fired on the message thread after any import / update / delete / rescan. */
     std::function<void()> onLibraryChanged;
 
-    /** Rendezvous used by amp editors to ask the app to show the browser in
-        pick mode. MainComponent installs the handler at startup. */
-    std::function<void (AmpLibraryEntry::Kind,
+    /** Rendezvous used by amp/IR editors to ask the app to show the browser in
+        pick mode, filtered to the given categories. MainComponent installs the
+        handler at startup. */
+    std::function<void (juce::Array<AmpLibraryEntry::Category>,
                         std::function<void (juce::String /*entryId*/)>)> onPickRequested;
 
-    void requestPick (AmpLibraryEntry::Kind k, std::function<void (juce::String)> cb)
+    void requestPick (juce::Array<AmpLibraryEntry::Category> categories,
+                      std::function<void (juce::String)> cb)
     {
         if (onPickRequested)
-            onPickRequested (k, std::move (cb));
+            onPickRequested (std::move (categories), std::move (cb));
     }
 
 private:

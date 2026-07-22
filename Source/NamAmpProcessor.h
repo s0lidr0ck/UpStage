@@ -27,8 +27,16 @@ class NamAmpProcessor : public juce::AudioPluginInstance
 public:
     static constexpr const char* kIdentifier = "UPSTAGE_INTERNAL:NAM_AMP";
 
-    NamAmpProcessor();
+    /** amp = full head row (tone stack, cab slot, dual mode). pedal = compact
+        capture row (model + in/out gain only) meant to sit before the amp with
+        plugins free to slot in between. Same engine, same identifier - the
+        role is part of the saved state. */
+    enum class Role { amp, pedal };
+
+    explicit NamAmpProcessor (Role role = Role::amp);
     ~NamAmpProcessor() override;
+
+    Role getRole() const { return role; }
 
     //==========================================================================
     // Rig / cab management. Sides: 0 = A, 1 = B. Message thread only.
@@ -72,7 +80,8 @@ public:
 
     //==========================================================================
     // juce::AudioProcessor
-    const juce::String getName() const override { return "NAM Amp"; } // stable: appearance map keys on name
+    // Stable per role: the appearance map keys on name.
+    const juce::String getName() const override { return role == Role::pedal ? "NAM Pedal" : "NAM Amp"; }
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
@@ -136,6 +145,7 @@ private:
     void updateToneCoeffs() noexcept;
     void applySlimSize (nam::DSP* m) const;
 
+    Role role = Role::amp;
     Side sides[2];
     juce::SpinLock modelLock;
     juce::ThreadPool loaderPool { 1 };

@@ -1,5 +1,9 @@
 #include "NamAmpProcessor.h"
 #include "NamAmpEditor.h"
+#include "NamIrProcessor.h"
+#include "NamIrEditor.h"
+
+juce::AudioProcessorEditor* NamIrProcessor::createEditor() { return new NamIrEditor (*this); }
 
 #include "NAM/dsp.h"
 #include "NAM/get_dsp.h"
@@ -56,10 +60,11 @@ void NamAmpProcessor::Biquad::makeHighShelf (double sr, double f0, double gainDb
 }
 
 //==============================================================================
-NamAmpProcessor::NamAmpProcessor()
+NamAmpProcessor::NamAmpProcessor (Role r)
     : juce::AudioPluginInstance (BusesProperties()
                                      .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                                     .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+                                     .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      role (r)
 {
 }
 
@@ -385,15 +390,19 @@ void NamAmpProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         if (outChans > 1) buffer.addFrom (1, 0, sideBuf[1], 0, 0, n, gB * rB);
     }
 
-    // Tone stack + output gain.
-    if (toneDirty.exchange (false))
-        updateToneCoeffs();
-
-    for (int ch = 0; ch < outChans; ++ch)
+    // Tone stack + output gain (pedal rows skip the tone stack - a pedal
+    // capture is just the pedal's own voice).
+    if (role == Role::amp)
     {
-        float* d = buffer.getWritePointer (ch);
-        for (int i = 0; i < n; ++i)
-            d[i] = toneHigh[ch].p (toneMid[ch].p (toneLow[ch].p (d[i])));
+        if (toneDirty.exchange (false))
+            updateToneCoeffs();
+
+        for (int ch = 0; ch < outChans; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            for (int i = 0; i < n; ++i)
+                d[i] = toneHigh[ch].p (toneMid[ch].p (toneLow[ch].p (d[i])));
+        }
     }
 
     buffer.applyGain (juce::Decibels::decibelsToGain (outputGainDb.load()));
@@ -406,6 +415,7 @@ bool NamAmpProcessor::hasEditor() const { return true; }
 void NamAmpProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::XmlElement xml ("NamAmp");
+    xml.setAttribute ("role",         role == Role::pedal ? "pedal" : "amp");
     xml.setAttribute ("dual",         dualMode.load() ? 1 : 0);
     xml.setAttribute ("inputGainDb",  (double) inputGainDb.load());
     xml.setAttribute ("bass",         (double) bassKnob.load());
@@ -437,6 +447,7 @@ void NamAmpProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (xml == nullptr || ! xml->hasTagName ("NamAmp"))
         return;
 
+    role          = xml->getStringAttribute ("role", "amp") == "pedal" ? Role::pedal : Role::amp;
     dualMode      = xml->getIntAttribute ("dual") != 0;
     inputGainDb   = (float) xml->getDoubleAttribute ("inputGainDb", 0.0);
     bassKnob      = (float) xml->getDoubleAttribute ("bass", 5.0);
@@ -468,7 +479,7 @@ void NamAmpProcessor::setStateInformation (const void* data, int sizeInBytes)
 
 void NamAmpProcessor::fillInPluginDescription (juce::PluginDescription& desc) const
 {
-    desc.name             = "NAM Amp";
+    desc.name             = getName();
     desc.descriptiveName  = "UpStage internal NAM A2 amp modeler";
     desc.pluginFormatName = "Internal";
     desc.category         = "Effect";

@@ -22,7 +22,8 @@ public:
         setLookAndFeel (&lnf);
 
         titleLabel.setComponentID ("strip_label");
-        titleLabel.setText ("NAM AMP", juce::dontSendNotification);
+        titleLabel.setText (proc.getRole() == NamAmpProcessor::Role::pedal ? "NAM PEDAL" : "NAM AMP",
+                            juce::dontSendNotification);
         titleLabel.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (titleLabel);
 
@@ -150,7 +151,14 @@ private:
         s.browseRig.onClick = [this, i]
         {
             juce::Component::SafePointer<NamAmpEditor> safe (this);
-            AmpLibrary::instance().requestPick (AmpLibraryEntry::Kind::rig,
+            // Pedal rows browse pedals; amp rows browse any capture type.
+            juce::Array<AmpLibraryEntry::Category> cats;
+            if (proc.getRole() == NamAmpProcessor::Role::pedal)
+                cats = { AmpLibraryEntry::Category::pedal };
+            else
+                cats = { AmpLibraryEntry::Category::head, AmpLibraryEntry::Category::fullRig,
+                         AmpLibraryEntry::Category::pedal };
+            AmpLibrary::instance().requestPick (std::move (cats),
                 [safe, i] (juce::String id)
                 {
                     if (safe != nullptr)
@@ -171,7 +179,8 @@ private:
         s.browseCab.onClick = [this, i]
         {
             juce::Component::SafePointer<NamAmpEditor> safe (this);
-            AmpLibrary::instance().requestPick (AmpLibraryEntry::Kind::cab,
+            AmpLibrary::instance().requestPick ({ AmpLibraryEntry::Category::cab,
+                                                  AmpLibraryEntry::Category::space },
                 [safe, i] (juce::String id)
                 {
                     if (safe != nullptr)
@@ -226,8 +235,19 @@ private:
     //==========================================================================
     void applyModeLayout()
     {
-        const bool dual = proc.dualMode.load();
-        setSize (dual ? kDualWidth : kSingleWidth, kHeight);
+        const bool pedal = proc.getRole() == NamAmpProcessor::Role::pedal;
+        const bool dual = ! pedal && proc.dualMode.load();
+        setSize (pedal ? kPedalWidth : (dual ? kDualWidth : kSingleWidth),
+                 pedal ? kPedalHeight : kHeight);
+
+        // Pedal rows: no cab stage, no tone stack, no dual mode.
+        dualButton.setVisible (! pedal);
+        for (auto* c : { (juce::Component*) &side[0].cabReadout, (juce::Component*) &side[0].cabToggle,
+                         (juce::Component*) &side[0].browseCab,
+                         (juce::Component*) &bassKnob.slider,   (juce::Component*) &bassKnob.label,
+                         (juce::Component*) &midKnob.slider,    (juce::Component*) &midKnob.label,
+                         (juce::Component*) &trebleKnob.slider, (juce::Component*) &trebleKnob.label })
+            c->setVisible (! pedal);
 
         for (auto* c : { (juce::Component*) &side[1].rigStrip, (juce::Component*) &side[1].browseRig,
                          (juce::Component*) &side[1].cabReadout, (juce::Component*) &side[1].cabToggle,
@@ -282,15 +302,37 @@ private:
 
     void layout()
     {
-        const bool dual = proc.dualMode.load();
+        const bool pedal = proc.getRole() == NamAmpProcessor::Role::pedal;
+        const bool dual = ! pedal && proc.dualMode.load();
         auto area = getLocalBounds().reduced (22, 8);
 
         auto header = area.removeFromTop (26);
-        dualButton.setBounds (header.removeFromRight (64).reduced (0, 2));
-        header.removeFromRight (6);
+        if (! pedal)
+        {
+            dualButton.setBounds (header.removeFromRight (64).reduced (0, 2));
+            header.removeFromRight (6);
+        }
         liteButton.setBounds (header.removeFromRight (56).reduced (0, 2));
         titleLabel.setBounds (header.reduced (60, 0));
         area.removeFromTop (4);
+
+        if (pedal)
+        {
+            layoutSide (side[0], area.removeFromLeft (240), false);
+            auto centre = area.reduced (8, 0);
+            auto knobRow = centre.removeFromTop (96);
+            const int kw = knobRow.getWidth() / 2;
+            auto placePedalKnob = [] (LabelledKnob& k, juce::Rectangle<int> cell)
+            {
+                k.label.setBounds (cell.removeFromBottom (14));
+                auto sq = cell.withSizeKeepingCentre (juce::jmin (cell.getWidth(), 64),
+                                                      juce::jmin (cell.getHeight(), 64));
+                k.slider.setBounds (sq);
+            };
+            placePedalKnob (inputKnob,  knobRow.removeFromLeft (kw));
+            placePedalKnob (outputKnob, knobRow);
+            return;
+        }
 
         const int sideWidth = dual ? 250 : 240;
         layoutSide (side[0], area.removeFromLeft (sideWidth), dual);
@@ -418,6 +460,8 @@ private:
     static constexpr int kSingleWidth = 640;
     static constexpr int kDualWidth   = 1000;
     static constexpr int kHeight      = 330;
+    static constexpr int kPedalWidth  = 500;
+    static constexpr int kPedalHeight = 260;
 
     NamAmpProcessor& proc;
     MixerLookAndFeel lnf;

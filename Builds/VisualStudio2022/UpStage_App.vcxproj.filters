@@ -3972,6 +3972,12 @@
     <ClInclude Include="..\..\Source\NamAmpEditor.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\NamIrProcessor.h">
+      <Filter>UpStage\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\NamIrEditor.h">
+      <Filter>UpStage\Source</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\AmpLibraryBrowserWindow.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>

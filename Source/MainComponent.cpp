@@ -1,6 +1,7 @@
 ﻿#include "MainComponent.h"
 #include "MixerLookAndFeel.h"
 #include "NamAmpProcessor.h"
+#include "NamIrProcessor.h"
 #include "AmpImportDialog.h"
 #include <windows.h>
 #include <psapi.h>
@@ -83,10 +84,11 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Amp editors ask for the browser through this rendezvous.
     AmpLibrary::instance().onPickRequested =
-        [this] (AmpLibraryEntry::Kind kind, std::function<void (juce::String)> cb)
+        [this] (juce::Array<AmpLibraryEntry::Category> categories,
+                std::function<void (juce::String)> cb)
     {
         auto& win = ensureAmpBrowser();
-        win.getContent().enterPickMode (kind, std::move (cb));
+        win.getContent().enterPickMode (std::move (categories), std::move (cb));
         win.setVisible (true);
         win.toFront (true);
     };
@@ -401,9 +403,9 @@ MainComponent::MainComponent() : menuBar (this)
         // Plugin chain panel
         channelStripPanels[i] = std::make_unique<ChannelStripPanel> (*channels[i]);
         channelStripPanels[i]->onAddPluginClicked = [this, i] { showAddPluginMenu (i); };
-        channelStripPanels[i]->onAddAmpClicked = [this, i]
+        channelStripPanels[i]->onAddInternalRow = [this, i] (int kind)
         {
-            channels[i]->addAmp ([this, i] (bool)
+            channels[i]->addInternalRow (kind, [this, i] (bool)
             {
                 channelStripPanels[i]->refresh();
             });
@@ -484,9 +486,9 @@ MainComponent::MainComponent() : menuBar (this)
 
     inputChannelPanel = std::make_unique<ChannelStripPanel> (*inputChannel);
     inputChannelPanel->onAddPluginClicked = [this] { showAddPluginMenu (-1); };
-    inputChannelPanel->onAddAmpClicked = [this]
+    inputChannelPanel->onAddInternalRow = [this] (int kind)
     {
-        inputChannel->addAmp ([this] (bool)
+        inputChannel->addInternalRow (kind, [this] (bool)
         {
             inputChannelPanel->refresh();
         });
@@ -3123,13 +3125,16 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         {
             const auto& slot = data.channels[i].plugins.getReference (slotIndex);
 
-            if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier)
+            if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier
+                || slot.pluginIdentifier == NamIrProcessor::kIdentifier)
             {
                 juce::MemoryBlock ampBlob = slot.stateData;
                 bool ampBypassed = slot.isBypassed;
                 int ampChan = i, ampSlot = slotIndex;
+                // Role restores from the state blob; kind here only picks the class.
+                const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
 
-                channels[i]->addAmp ([this, ampChan, ampSlot, ampBlob, ampBypassed] (bool ok)
+                channels[i]->addInternalRow (rowKind, [this, ampChan, ampSlot, ampBlob, ampBypassed] (bool ok)
                 {
                     if (ok)
                     {
@@ -3185,13 +3190,15 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
     {
         const auto& slot = data.inputChannelState.plugins.getReference (slotIndex);
 
-        if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier)
+        if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier
+            || slot.pluginIdentifier == NamIrProcessor::kIdentifier)
         {
             juce::MemoryBlock ampBlob = slot.stateData;
             bool ampBypassed = slot.isBypassed;
             int ampSlot = slotIndex;
+            const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
 
-            inputChannel->addAmp ([this, ampSlot, ampBlob, ampBypassed] (bool ok)
+            inputChannel->addInternalRow (rowKind, [this, ampSlot, ampBlob, ampBypassed] (bool ok)
             {
                 if (ok)
                 {

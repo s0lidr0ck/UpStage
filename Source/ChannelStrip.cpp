@@ -1,5 +1,6 @@
 #include "ChannelStrip.h"
 #include "NamAmpProcessor.h"
+#include "NamIrProcessor.h"
 
 ChannelStrip::ChannelStrip (int index, juce::AudioPluginFormatManager& fm)
     : channelIndex (index), formatManager (fm)
@@ -112,24 +113,38 @@ bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
     return true;
 }
 
-void ChannelStrip::addAmp (std::function<void(bool)> callback)
+void ChannelStrip::addInternalRow (int kind, std::function<void(bool)> callback)
 {
-    juce::MessageManager::callAsync ([this, callback]
+    juce::MessageManager::callAsync ([this, kind, callback]
     {
-        auto amp = std::make_unique<NamAmpProcessor>();
+        std::unique_ptr<juce::AudioPluginInstance> proc;
+        const char* identifier = nullptr;
+
+        switch (kind)
+        {
+            default:
+            case 0: proc = std::make_unique<NamAmpProcessor> (NamAmpProcessor::Role::amp);
+                    identifier = NamAmpProcessor::kIdentifier; break;
+            case 1: proc = std::make_unique<NamAmpProcessor> (NamAmpProcessor::Role::pedal);
+                    identifier = NamAmpProcessor::kIdentifier; break;
+            case 2: proc = std::make_unique<NamIrProcessor> (NamIrProcessor::Role::cab);
+                    identifier = NamIrProcessor::kIdentifier; break;
+            case 3: proc = std::make_unique<NamIrProcessor> (NamIrProcessor::Role::space);
+                    identifier = NamIrProcessor::kIdentifier; break;
+        }
 
         if (currentSampleRate > 0)
         {
-            amp->setRateAndBufferSizeDetails (currentSampleRate, currentBlockSize);
-            amp->prepareToPlay (currentSampleRate, currentBlockSize);
+            proc->setRateAndBufferSizeDetails (currentSampleRate, currentBlockSize);
+            proc->prepareToPlay (currentSampleRate, currentBlockSize);
         }
 
         if (playHead != nullptr)
-            amp->setPlayHead (playHead);
+            proc->setPlayHead (playHead);
 
         auto* entry = new PluginEntry();
-        entry->processor  = std::move (amp);
-        entry->identifier = NamAmpProcessor::kIdentifier;
+        entry->processor  = std::move (proc);
+        entry->identifier = identifier;
         entry->bypassed   = false;
 
         {

@@ -86,13 +86,22 @@ public:
         rebuild();
     }
 
-    void enterPickMode (AmpLibraryEntry::Kind kind, std::function<void (juce::String)> cb)
+    void enterPickMode (juce::Array<AmpLibraryEntry::Category> categories,
+                        std::function<void (juce::String)> cb)
     {
         pickMode = true;
-        pickKind = kind;
+        pickCategories = std::move (categories);
         pickCallback = std::move (cb);
-        modeLabel.setText (kind == AmpLibraryEntry::Kind::rig ? "PICK A RIG" : "PICK A CAB",
-                           juce::dontSendNotification);
+
+        juce::String title;
+        if (pickCategories.size() == 1)
+            title = "PICK: " + AmpLibraryEntry::categoryDisplayName (pickCategories[0]).toUpperCase();
+        else if (! pickCategories.isEmpty()
+                 && AmpLibraryEntry::kindForCategory (pickCategories[0]) == AmpLibraryEntry::Kind::cab)
+            title = "PICK AN IR";
+        else
+            title = "PICK A RIG";
+        modeLabel.setText (title, juce::dontSendNotification);
         rebuild();
     }
 
@@ -261,7 +270,7 @@ private:
     //==========================================================================
     bool matchesFilter (const AmpLibraryEntry& e) const
     {
-        if (pickMode && e.kind != pickKind)
+        if (pickMode && ! pickCategories.contains (e.category))
             return false;
 
         if (typeFilter.getSelectedId() > 1)
@@ -331,7 +340,7 @@ private:
 
         for (const auto& def : defs)
         {
-            if (pickMode && AmpLibraryEntry::kindForCategory (def.cat) != pickKind)
+            if (pickMode && ! pickCategories.contains (def.cat))
                 continue;
 
             juce::Array<const AmpLibraryEntry*> matching;
@@ -643,7 +652,7 @@ private:
     juce::OwnedArray<SectionLabel> sections;
 
     bool pickMode = false;
-    AmpLibraryEntry::Kind pickKind = AmpLibraryEntry::Kind::rig;
+    juce::Array<AmpLibraryEntry::Category> pickCategories;
     std::function<void (juce::String)> pickCallback;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AmpLibraryBrowserContent)
