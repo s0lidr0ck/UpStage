@@ -1,4 +1,5 @@
 #include "FxBusPanel.h"
+#include "MidiLearnHooks.h"
 
 //==============================================================================
 FxBusPanel::FxBusPanel (FxBus& b)
@@ -412,11 +413,13 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
         }
         menu.addSeparator();
         menu.addItem (3, "Remove");
+        addSlotMidiItems (menu, slotIndex);
     }
     else
     {
         if (clipboardHasData)
             menu.addItem (11, "Paste");
+        addSlotMidiItems (menu, slotIndex);
     }
 
     menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
@@ -437,6 +440,24 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                 break;
             case 6:
                 showNicknameDialog (slotIndex);
+                break;
+
+            case 30:
+                if (MidiLearnHooks::beginLearn)
+                    MidiLearnHooks::beginLearn (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex), 0.0f, 1.0f);
+                break;
+
+            case 31:
+                if (MidiLearnHooks::clearBinding)
+                    MidiLearnHooks::clearBinding (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex));
+                break;
+
+            case 32: case 33:
+                if (MidiLearnHooks::setMomentary)
+                    MidiLearnHooks::setMomentary (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex), result == 33);
                 break;
 
             case 10:
@@ -475,6 +496,31 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
             default: break;
         }
     });
+}
+
+void FxBusPanel::addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const
+{
+    if (! MidiLearnHooks::beginLearn) return;
+
+    const auto pid = ChannelStripPanel::slotBypassParamId ("fx", slotIndex);
+    const int  cc  = MidiLearnHooks::getCc ? MidiLearnHooks::getCc (pid) : -1;
+
+    menu.addSeparator();
+    menu.addItem (30, cc >= 0 ? "Learn MIDI (re-learn, now CC " + juce::String (cc) + ")"
+                              : "Learn MIDI");
+    menu.addItem (31, "Clear MIDI binding", cc >= 0);
+
+    if (cc >= 0)
+    {
+        // Which mode is right can't be detected from the CC stream - a momentary
+        // and a latching switch send identical messages. Latching is the default.
+        const bool momentary = MidiLearnHooks::isMomentary
+                            && MidiLearnHooks::isMomentary (pid);
+        juce::PopupMenu modeMenu;
+        modeMenu.addItem (32, "Latching (one message per press)", true, ! momentary);
+        modeMenu.addItem (33, "Momentary (127 held, 0 on release)", true, momentary);
+        menu.addSubMenu ("MIDI Switch Type", modeMenu);
+    }
 }
 
 void FxBusPanel::showNicknameDialog (int slotIndex)

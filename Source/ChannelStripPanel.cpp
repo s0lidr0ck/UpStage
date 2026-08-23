@@ -1,8 +1,9 @@
 #include "ChannelStripPanel.h"
+#include "MidiLearnHooks.h"
 
 //==============================================================================
-ChannelStripPanel::ChannelStripPanel (ChannelStrip& s)
-    : strip (s)
+ChannelStripPanel::ChannelStripPanel (ChannelStrip& s, const juce::String& id)
+    : strip (s), stripId (id)
 {
     refresh();
 }
@@ -326,6 +327,7 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
         menu.addItem (4, "Move Down", slotIndex < strip.getNumPlugins() - 1);
         menu.addSeparator();
         menu.addItem (5, "Remove");
+        addSlotMidiItems (menu, slotIndex);
     }
     else
     {
@@ -337,6 +339,7 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
         menu.addItem (14, "Add NAM Pedal");
         menu.addItem (15, "Add Cab IR");
         menu.addItem (16, "Add Space IR");
+        addSlotMidiItems (menu, slotIndex);
     }
 
     menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
@@ -429,6 +432,22 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                 if (onAddPluginClicked) onAddPluginClicked();
                 break;
 
+            case 30:
+                if (MidiLearnHooks::beginLearn)
+                    MidiLearnHooks::beginLearn (slotBypassParamId (stripId, slotIndex), 0.0f, 1.0f);
+                break;
+
+            case 31:
+                if (MidiLearnHooks::clearBinding)
+                    MidiLearnHooks::clearBinding (slotBypassParamId (stripId, slotIndex));
+                break;
+
+            case 32: case 33:
+                if (MidiLearnHooks::setMomentary)
+                    MidiLearnHooks::setMomentary (slotBypassParamId (stripId, slotIndex),
+                                                 result == 33);
+                break;
+
             case 13: case 14: case 15: case 16:
                 if (onAddInternalRow) onAddInternalRow (result - 13);
                 break;
@@ -456,6 +475,31 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
             default: break;
         }
     });
+}
+
+void ChannelStripPanel::addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const
+{
+    if (! MidiLearnHooks::beginLearn || stripId.isEmpty()) return;
+
+    const auto pid = slotBypassParamId (stripId, slotIndex);
+    const int  cc  = MidiLearnHooks::getCc ? MidiLearnHooks::getCc (pid) : -1;
+
+    menu.addSeparator();
+    menu.addItem (30, cc >= 0 ? "Learn MIDI (re-learn, now CC " + juce::String (cc) + ")"
+                              : "Learn MIDI");
+    menu.addItem (31, "Clear MIDI binding", cc >= 0);
+
+    if (cc >= 0)
+    {
+        // Which mode is right can't be detected from the CC stream - a momentary
+        // and a latching switch send identical messages. Latching is the default.
+        const bool momentary = MidiLearnHooks::isMomentary
+                            && MidiLearnHooks::isMomentary (pid);
+        juce::PopupMenu modeMenu;
+        modeMenu.addItem (32, "Latching (one message per press)", true, ! momentary);
+        modeMenu.addItem (33, "Momentary (127 held, 0 on release)", true, momentary);
+        menu.addSubMenu ("MIDI Switch Type", modeMenu);
+    }
 }
 
 juce::Array<PluginAppearanceState> ChannelStripPanel::getAppearances() const

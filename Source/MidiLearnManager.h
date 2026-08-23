@@ -54,6 +54,19 @@ public:
         float        maxValue    = 1.0f;
 
         //----------------------------------------------------------------------
+        // Switch behaviour (only meaningful for on/off targets)
+
+        /** How the bound physical switch reports a press.
+            A momentary switch sends 127 on press and 0 on release - two
+            messages per press. A latching switch sends ONE message per press,
+            alternating 0 / 127, and tracks its own state.
+            The two message streams are identical, so this cannot be detected
+            automatically - it has to be told.
+            Default false (latching), matching most amp-modeller footcontrollers
+            and the follow-the-value convention the other switch params use. */
+        bool momentarySwitch = false;
+
+        //----------------------------------------------------------------------
         // Soft takeover state (not serialised — re-armed on every recall)
 
         /** Soft takeover states for this binding. */
@@ -132,6 +145,11 @@ public:
 
     /** CC number bound to paramID, or -1 if not bound. Thread-safe. */
     int getCcForParam (const juce::String& paramID) const;
+
+    /** Switch behaviour for a bound on/off target. See Binding::momentarySwitch.
+        Returns false (latching) when paramID isn't bound. Thread-safe. */
+    bool isMomentarySwitch (const juce::String& paramID) const;
+    void setMomentarySwitch (const juce::String& paramID, bool momentary);
     /** MIDI channel bound to paramID (0 = any), or -1 if not bound. Thread-safe. */
     int getChannelForParam (const juce::String& paramID) const;
 

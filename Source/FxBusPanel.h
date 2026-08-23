@@ -78,6 +78,7 @@ private:
     void rebuildSlots();
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
+    void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
     void showNicknameDialog (int slotIndex);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxBusPanel)

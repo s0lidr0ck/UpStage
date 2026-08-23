@@ -75,10 +75,16 @@ bool MidiLearnManager::processMessage (const juce::MidiMessage& msg)
     // ---- Learning mode: record a new binding ----
     if (learningParamID.isNotEmpty())
     {
-        // Remove any existing binding for this param.
+        // Remove any existing binding for this param, but carry its switch mode
+        // over - re-learning which CC to listen to shouldn't silently reset how
+        // the switch is interpreted.
+        bool previousMomentary = false;
         for (int i = bindings.size() - 1; i >= 0; --i)
             if (bindings[i].paramID == learningParamID)
+            {
+                previousMomentary = bindings[i].momentarySwitch;
                 bindings.remove (i);
+            }
 
         // Find param info.
         float minV = 0.0f, maxV = 1.0f;
@@ -91,6 +97,7 @@ bool MidiLearnManager::processMessage (const juce::MidiMessage& msg)
         b.midiChannel = 0; // any
         b.minValue    = minV;
         b.maxValue    = maxV;
+        b.momentarySwitch = previousMomentary;
 
         // Freshly learned — lock immediately (no target to catch up to yet).
         b.softState      = Binding::SoftTakeoverState::LOCKED;
@@ -193,6 +200,23 @@ int MidiLearnManager::getCcForParam (const juce::String& paramID) const
     return -1;
 }
 
+bool MidiLearnManager::isMomentarySwitch (const juce::String& paramID) const
+{
+    juce::ScopedLock sl (lock);
+    for (const auto& b : bindings)
+        if (b.paramID == paramID)
+            return b.momentarySwitch;
+    return false;
+}
+
+void MidiLearnManager::setMomentarySwitch (const juce::String& paramID, bool momentary)
+{
+    juce::ScopedLock sl (lock);
+    for (auto& b : bindings)
+        if (b.paramID == paramID)
+            b.momentarySwitch = momentary;
+}
+
 int MidiLearnManager::getChannelForParam (const juce::String& paramID) const
 {
     juce::ScopedLock sl (lock);
@@ -222,6 +246,7 @@ void MidiLearnManager::saveToXml (juce::XmlElement& parent) const
         bEl->setAttribute ("channel",     b.midiChannel);
         bEl->setAttribute ("minValue",    b.minValue);
         bEl->setAttribute ("maxValue",    b.maxValue);
+        bEl->setAttribute ("momentary",   b.momentarySwitch ? 1 : 0);
         // Soft takeover runtime state (lastPhysicalCC, softState, targetCC) is
         // intentionally NOT serialised — it is re-armed by setParameterTarget()
         // after project load, matching the freshly restored parameter values.
@@ -248,6 +273,7 @@ void MidiLearnManager::loadFromXml (const juce::XmlElement& parent)
         b.midiChannel = bEl->getIntAttribute    ("channel", 0);
         b.minValue    = (float) bEl->getDoubleAttribute ("minValue", 0.0);
         b.maxValue    = (float) bEl->getDoubleAttribute ("maxValue", 1.0);
+        b.momentarySwitch = (bEl->getIntAttribute ("momentary", 0) != 0);
 
         // Runtime soft takeover fields — start LOCKED until caller arms them.
         b.softState      = Binding::SoftTakeoverState::LOCKED;

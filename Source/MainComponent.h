@@ -123,6 +123,16 @@ public:
     bool isProjectDirty() const { return projectDirty; }
     void loadProjectData (const ProjectData& data);
     void loadProjectPlugins (const ProjectData& data);
+
+    /** Rebuild one strip's plugin chain from a saved ChannelState.
+        Queues each slot in order through the strip's async load FIFO (which
+        preserves chain order), restoring state blob, bypass and appearance as
+        each one lands. onSlotLoaded fires on the message thread once per slot,
+        loaded or not, so callers can drive a progress count.
+        Does NOT clear the strip first - the caller decides that. */
+    void restoreChainInto (ChannelStrip& strip,
+                           const ChannelState& state,
+                           std::function<void()> onSlotLoaded);
     void loadSongState (const ProjectData& data);
     ProjectData collectProjectData() const;
 
@@ -450,6 +460,60 @@ private:
     juce::File getAutosaveFile() const;
     void checkAutosaveRecovery();
     void swapChannels (int fromIndex, int toIndex);
+
+    //==========================================================================
+    // Whole-channel copy / paste (session-only clipboard, like any clipboard).
+    struct ChannelClipboard
+    {
+        bool         valid = false;
+        ChannelState state;              // name, chain + plugin blobs, gains, pan
+        bool         muted   = false;
+        bool         soloed  = false;
+        double       faderDb = 0.0;      // outputFaders value
+        double       panKnob = 0.0;      // outputGainKnobs value
+        double       trimKnob = 0.0;     // inputTrimKnobs value
+    };
+
+    ChannelClipboard channelClipboard;
+
+    void copyChannelToClipboard (int channelIndex);
+    void pasteChannelFromClipboard (int channelIndex);
+    void showChannelContextMenu (int channelIndex);
+
+    //==========================================================================
+    /** Momentary MIDI targets (slot on/off, tap tempo) fire on the rising edge
+        of the CC so one footswitch press = one action, whether the switch is
+        momentary (127 then 0) or latching (127, 0, 127...).
+        Maps paramID -> whether the switch was last seen pressed.
+        Message thread only. */
+    std::map<juce::String, bool> momentaryPressed;
+
+    /** Returns true when `value` is a 0->1 transition for paramID. */
+    bool isRisingEdge (const juce::String& paramID, float value);
+
+    /** Returns true when this message counts as one press of the bound switch,
+        honouring the binding's momentary/latching mode. */
+    bool isSwitchPress (const juce::String& paramID, float value);
+
+    /** Resolve a slot address to its strip + panel. stripId is "ch0".."ch3" or
+        "in"; the FX bus ("fx") is a different type and is handled by the
+        callers. Returns false when the address doesn't name a loaded slot. */
+    bool resolveSlot (const juce::String& stripId, int slotIndex,
+                      ChannelStrip*& strip, ChannelStripPanel*& panel);
+
+    /** Set/read one slot's bypass and refresh its panel. stripId is "ch0".."ch3",
+        "in" or "fx". */
+    void setSlotBypassed (const juce::String& stripId, int slotIndex, bool bypassed);
+    bool isSlotBypassed  (const juce::String& stripId, int slotIndex);
+
+    /** One tap of the tap-tempo clock, from the button, a key or MIDI. */
+    void doTap();
+
+    /** juce::Button fires its click on mouse-up for any mouse button, so a
+        right-click meant for the TAP button's Learn MIDI menu would also tap.
+        Recorded fresh on every mouse-down over the button, so it can't go
+        stale, and checked in buttonClicked(). */
+    bool tapClickWasRightButton = false;
     int  dragSourceChannel = -1;
     void saveLastProjectPath();
     juce::StringArray loadRecentProjects();

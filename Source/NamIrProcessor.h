@@ -28,7 +28,7 @@ public:
 
     Role getRole() const { return role; }
 
-    /** Stable per-instance id for MIDI-learn param addressing (see NamMidiHooks). */
+    /** Stable per-instance id for MIDI-learn param addressing (see MidiLearnHooks). */
     juce::String getInstanceId() const { return instanceId; }
     juce::String midiParamId (const juce::String& knob) const { return "nam:" + instanceId + ":" + knob; }
 

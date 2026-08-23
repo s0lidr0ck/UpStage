@@ -5,7 +5,10 @@
 class ChannelStripPanel : public juce::Component
 {
 public:
-    explicit ChannelStripPanel (ChannelStrip& strip);
+    /** @param stripId  Short identifier used to build MIDI-learn param IDs for
+                        this strip's slots: "ch0".."ch3" for the channel strips,
+                        "in" for the pre-FX input channel. */
+    ChannelStripPanel (ChannelStrip& strip, const juce::String& stripId);
     ~ChannelStripPanel() override;
 
     void refresh();
@@ -20,6 +23,14 @@ public:
     static constexpr int kSlotHeight = 26;
     static constexpr int kSlotPadding = 2;
     static constexpr int kMaxVisibleSlots = 8;
+
+    /** MIDI-learn param ID for one slot of one strip. Slots are addressed by
+        position, so a footswitch keeps controlling the same spot on the board
+        regardless of which plugin is loaded there. */
+    static juce::String slotBypassParamId (const juce::String& stripId, int slotIndex)
+    {
+        return "slotBypass:" + stripId + ":" + juce::String (slotIndex);
+    }
 
     int getPreferredHeight() const;
 
@@ -59,6 +70,7 @@ private:
     };
 
     ChannelStrip& strip;
+    juce::String  stripId;
     SlotInfo slots[kMaxVisibleSlots];
     int numSlots = 0;
 
@@ -73,6 +85,7 @@ private:
     void rebuildSlots();
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
+    void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
     void showNicknameDialog (int slotIndex);
 
     int  dragSourceSlot = -1;
