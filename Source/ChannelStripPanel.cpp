@@ -1,8 +1,9 @@
 #include "ChannelStripPanel.h"
+#include "MidiLearnHooks.h"
 
 //==============================================================================
-ChannelStripPanel::ChannelStripPanel (ChannelStrip& s)
-    : strip (s)
+ChannelStripPanel::ChannelStripPanel (ChannelStrip& s, const juce::String& id)
+    : strip (s), stripId (id)
 {
     refresh();
 }
@@ -14,37 +15,34 @@ ChannelStripPanel::~ChannelStripPanel()
 //==============================================================================
 void ChannelStripPanel::rebuildSlots()
 {
-    int numPlugins = strip.getNumPlugins();
-    numSlots = juce::jmax (numPlugins, kMaxVisibleSlots);
-    numSlots = juce::jmin (numSlots, kMaxVisibleSlots);
+    numSlots = kMaxVisibleSlots;
 
     for (int i = 0; i < kMaxVisibleSlots; ++i)
     {
         slots[i].index = i;
-        if (i < numPlugins)
+
+        // Slots are fixed positions: emptiness is a property of the slot, not
+        // of how many plugins the strip happens to hold.
+        if (const auto* entry = strip.getPluginEntry (i))
         {
-            auto* proc = strip.getPlugin (i);
+            auto* proc = entry->processor.get();
             slots[i].name = (proc != nullptr) ? proc->getName() : "(unknown)";
-            slots[i].bypassed = strip.isPluginBypassed (i);
+            slots[i].bypassed = entry->bypassed;
             slots[i].empty = false;
 
-            if (proc != nullptr)
-            {
-                // Per-slot appearance lives on the chain entry. Legacy projects
-                // stored it keyed by plugin name - fall back to that map when
-                // the entry carries nothing, so old projects still display.
-                const auto& entry = strip.getPluginEntry (i);
-                slots[i].tintColour = entry.tint;
-                slots[i].nickname   = entry.nickname;
+            // Per-slot appearance lives on the chain entry. Legacy projects
+            // stored it keyed by plugin name - fall back to that map when
+            // the entry carries nothing, so old projects still display.
+            slots[i].tintColour = entry->tint;
+            slots[i].nickname   = entry->nickname;
 
-                if (entry.nickname.isEmpty() && entry.tint.getARGB() == 0)
+            if (proc != nullptr && entry->nickname.isEmpty() && entry->tint.getARGB() == 0)
+            {
+                auto it = pluginAppearance.find (proc->getName());
+                if (it != pluginAppearance.end())
                 {
-                    auto it = pluginAppearance.find (proc->getName());
-                    if (it != pluginAppearance.end())
-                    {
-                        slots[i].tintColour = it->second.tint;
-                        slots[i].nickname = it->second.nickname;
-                    }
+                    slots[i].tintColour = it->second.tint;
+                    slots[i].nickname = it->second.nickname;
                 }
             }
         }
@@ -212,7 +210,8 @@ void ChannelStripPanel::mouseDown (const juce::MouseEvent& e)
 
     if (slots[slotIndex].empty)
     {
-        if (onAddPluginClicked) onAddPluginClicked();
+        // Clicking an empty slot fills that slot, not wherever the chain ends.
+        if (onAddPluginClicked) onAddPluginClicked (slotIndex);
     }
     else
     {
@@ -252,24 +251,12 @@ void ChannelStripPanel::mouseUp (const juce::MouseEvent& e)
 {
     if (dragging && dragSourceSlot >= 0 && dragTargetSlot >= 0
         && dragSourceSlot != dragTargetSlot
-        && dragSourceSlot < strip.getNumPlugins())
+        && ! strip.isSlotEmpty (dragSourceSlot))
     {
-        // Move the plugin to the target slot
-        int from = dragSourceSlot;
-        int to = dragTargetSlot;
-
-        // Clamp target to valid plugin range (can't move past last plugin)
-        to = juce::jmin (to, strip.getNumPlugins() - 1);
-
-        if (from != to && to >= 0)
-        {
-            // Move step by step toward target
-            int step = (to > from) ? 1 : -1;
-            for (int pos = from; pos != to; pos += step)
-                strip.movePlugin (pos, pos + step);
-
-            refresh();
-        }
+        // Swap the two slots. Dropping onto an empty slot moves there; dropping
+        // onto an occupied one trades places. Nothing else in the rack moves.
+        strip.swapSlots (dragSourceSlot, dragTargetSlot);
+        refresh();
     }
     else if (! dragging && ! doubleClicked && dragSourceSlot >= 0 && ! slots[dragSourceSlot].empty)
     {
@@ -287,7 +274,7 @@ void ChannelStripPanel::mouseUp (const juce::MouseEvent& e)
 void ChannelStripPanel::showSlotContextMenu (int slotIndex)
 {
     juce::PopupMenu menu;
-    bool hasPlugin = slotIndex >= 0 && slotIndex < strip.getNumPlugins() && ! slots[slotIndex].empty;
+    bool hasPlugin = slotIndex >= 0 && ! strip.isSlotEmpty (slotIndex);
     auto& clipboard = getClipboard();
     bool clipboardHasData = clipboard.pluginIdentifier.isNotEmpty();
 
@@ -323,9 +310,10 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
 
         menu.addSeparator();
         menu.addItem (3, "Move Up", slotIndex > 0);
-        menu.addItem (4, "Move Down", slotIndex < strip.getNumPlugins() - 1);
+        menu.addItem (4, "Move Down", slotIndex < strip.getNumSlots() - 1);
         menu.addSeparator();
         menu.addItem (5, "Remove");
+        addSlotMidiItems (menu, slotIndex);
     }
     else
     {
@@ -337,6 +325,7 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
         menu.addItem (14, "Add NAM Pedal");
         menu.addItem (15, "Add Cab IR");
         menu.addItem (16, "Add Space IR");
+        addSlotMidiItems (menu, slotIndex);
     }
 
     menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
@@ -345,7 +334,7 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
 
         auto storeAppearance = [this, slotIndex] ()
         {
-            if (slotIndex >= strip.getNumPlugins()) return;
+            if (strip.isSlotEmpty (slotIndex)) return;
             strip.setPluginAppearance (slotIndex, slots[slotIndex].tintColour,
                                        slots[slotIndex].nickname);
             // Retire any legacy name-keyed value so it can't shadow the
@@ -365,11 +354,11 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                 break;
             }
             case 3:
-                strip.movePlugin (slotIndex, slotIndex - 1);
+                strip.swapSlots (slotIndex, slotIndex - 1);
                 refresh();
                 break;
             case 4:
-                strip.movePlugin (slotIndex, slotIndex + 1);
+                strip.swapSlots (slotIndex, slotIndex + 1);
                 refresh();
                 break;
             case 5:
@@ -392,8 +381,8 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                     proc->getStateInformation (cb.stateData);
                     cb.bypassed = strip.isPluginBypassed (slotIndex);
 
-                    auto& entry = strip.getPluginEntry (slotIndex);
-                    cb.pluginIdentifier = entry.identifier;
+                    if (const auto* entry = strip.getPluginEntry (slotIndex))
+                        cb.pluginIdentifier = entry->identifier;
                 }
                 break;
             }
@@ -403,8 +392,8 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                 auto& cb = getClipboard();
                 if (hasPlugin)
                 {
-                    auto& entry = strip.getPluginEntry (slotIndex);
-                    if (entry.identifier == cb.pluginIdentifier)
+                    const auto* entry = strip.getPluginEntry (slotIndex);
+                    if (entry != nullptr && entry->identifier == cb.pluginIdentifier)
                     {
                         auto* proc = strip.getPlugin (slotIndex);
                         if (proc != nullptr && cb.stateData.getSize() > 0)
@@ -413,24 +402,40 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                     else
                     {
                         if (onPastePlugin)
-                            onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                            onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed, slotIndex);
                     }
                 }
                 else
                 {
                     if (onPastePlugin)
-                        onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                        onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed, slotIndex);
                 }
                 refresh();
                 break;
             }
 
             case 12:
-                if (onAddPluginClicked) onAddPluginClicked();
+                if (onAddPluginClicked) onAddPluginClicked (slotIndex);
+                break;
+
+            case 30:
+                if (MidiLearnHooks::beginLearn)
+                    MidiLearnHooks::beginLearn (slotBypassParamId (stripId, slotIndex), 0.0f, 1.0f);
+                break;
+
+            case 31:
+                if (MidiLearnHooks::clearBinding)
+                    MidiLearnHooks::clearBinding (slotBypassParamId (stripId, slotIndex));
+                break;
+
+            case 32: case 33: case 34:
+                if (MidiLearnHooks::setSwitchType)
+                    MidiLearnHooks::setSwitchType (slotBypassParamId (stripId, slotIndex),
+                                                   result - 32);
                 break;
 
             case 13: case 14: case 15: case 16:
-                if (onAddInternalRow) onAddInternalRow (result - 13);
+                if (onAddInternalRow) onAddInternalRow (result - 13, slotIndex);
                 break;
 
             case 20: case 21: case 22: case 23: case 24: case 25: case 26: case 27:
@@ -456,6 +461,32 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
             default: break;
         }
     });
+}
+
+void ChannelStripPanel::addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const
+{
+    if (! MidiLearnHooks::beginLearn || stripId.isEmpty()) return;
+
+    const auto pid = slotBypassParamId (stripId, slotIndex);
+    const int  cc  = MidiLearnHooks::getCc ? MidiLearnHooks::getCc (pid) : -1;
+
+    menu.addSeparator();
+    menu.addItem (30, cc >= 0 ? "Learn MIDI (re-learn, now CC " + juce::String (cc) + ")"
+                              : "Learn MIDI");
+    menu.addItem (31, "Clear MIDI binding", cc >= 0);
+
+    if (cc >= 0)
+    {
+        // Latching and Momentary send identical CC streams, so the right one
+        // can't be detected - it has to be picked. Latching is the default.
+        const int type = MidiLearnHooks::getSwitchType
+                       ? MidiLearnHooks::getSwitchType (pid) : 0;
+        juce::PopupMenu modeMenu;
+        modeMenu.addItem (32, "Latching (alternates 0 / 127)",        true, type == 0);
+        modeMenu.addItem (33, "Momentary (127 held, 0 released)",     true, type == 1);
+        modeMenu.addItem (34, "Single value (same value each press)", true, type == 2);
+        menu.addSubMenu ("MIDI Switch Type", modeMenu);
+    }
 }
 
 juce::Array<PluginAppearanceState> ChannelStripPanel::getAppearances() const
@@ -487,7 +518,7 @@ void ChannelStripPanel::setAppearances (const juce::Array<PluginAppearanceState>
 
 void ChannelStripPanel::showNicknameDialog (int slotIndex)
 {
-    if (slotIndex < 0 || slotIndex >= strip.getNumPlugins()) return;
+    if (slotIndex < 0 || strip.isSlotEmpty (slotIndex)) return;
 
     auto* aw = new juce::AlertWindow ("Plugin Nickname",
                                        "Enter a display name for this plugin.\nLeave blank to use the original name.",
@@ -500,7 +531,7 @@ void ChannelStripPanel::showNicknameDialog (int slotIndex)
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
         [this, slotIndex, aw] (int result)
         {
-            if (result == 1 && slotIndex < strip.getNumPlugins())
+            if (result == 1 && ! strip.isSlotEmpty (slotIndex))
             {
                 auto nick = aw->getTextEditorContents ("nickname").trim();
                 slots[slotIndex].nickname = nick;

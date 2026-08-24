@@ -88,6 +88,8 @@ void SceneManager::saveToXml (juce::XmlElement& parent) const
         {
             auto* fxPlugEl = globEl->createNewChildElement ("FxPlugin");
             fxPlugEl->setAttribute ("id",       slot.pluginIdentifier);
+
+            fxPlugEl->setAttribute ("slot",     slot.slotIndex);
             fxPlugEl->setAttribute ("name",     slot.pluginName);
             fxPlugEl->setAttribute ("bypassed", slot.isBypassed ? 1 : 0);
             if (slot.stateData.getSize() > 0)
@@ -103,6 +105,8 @@ void SceneManager::saveToXml (juce::XmlElement& parent) const
         {
             auto* plugEl = inChEl->createNewChildElement ("Plugin");
             plugEl->setAttribute ("id",       slot.pluginIdentifier);
+
+            plugEl->setAttribute ("slot",     slot.slotIndex);
             plugEl->setAttribute ("name",     slot.pluginName);
             plugEl->setAttribute ("bypassed", slot.isBypassed ? 1 : 0);
             if (slot.stateData.getSize() > 0)
@@ -122,6 +126,8 @@ void SceneManager::saveToXml (juce::XmlElement& parent) const
             {
                 auto* plugEl = chEl->createNewChildElement ("Plugin");
                 plugEl->setAttribute ("id",       slot.pluginIdentifier);
+
+                plugEl->setAttribute ("slot",     slot.slotIndex);
                 plugEl->setAttribute ("name",     slot.pluginName);
                 plugEl->setAttribute ("bypassed", slot.isBypassed ? 1 : 0);
                 if (slot.stateData.getSize() > 0)
@@ -162,6 +168,8 @@ void SceneManager::loadFromXml (const juce::XmlElement& parent)
             {
                 PluginSlotState slot;
                 slot.pluginIdentifier = fxPlugEl->getStringAttribute ("id");
+
+                slot.slotIndex        = fxPlugEl->getIntAttribute ("slot", -1);
                 slot.pluginName       = fxPlugEl->getStringAttribute ("name");
                 slot.isBypassed       = fxPlugEl->getBoolAttribute   ("bypassed");
                 auto b64 = fxPlugEl->getAllSubText().trim();
@@ -180,6 +188,8 @@ void SceneManager::loadFromXml (const juce::XmlElement& parent)
                 {
                     PluginSlotState slot;
                     slot.pluginIdentifier = plugEl->getStringAttribute ("id");
+
+                    slot.slotIndex        = plugEl->getIntAttribute ("slot", -1);
                     slot.pluginName       = plugEl->getStringAttribute ("name");
                     slot.isBypassed       = plugEl->getBoolAttribute   ("bypassed");
                     auto b64 = plugEl->getAllSubText().trim();
@@ -204,6 +214,8 @@ void SceneManager::loadFromXml (const juce::XmlElement& parent)
             {
                 PluginSlotState slot;
                 slot.pluginIdentifier = plugEl->getStringAttribute ("id");
+
+                slot.slotIndex        = plugEl->getIntAttribute ("slot", -1);
                 slot.pluginName       = plugEl->getStringAttribute ("name");
                 slot.isBypassed       = plugEl->getBoolAttribute   ("bypassed");
                 auto b64 = plugEl->getAllSubText().trim();

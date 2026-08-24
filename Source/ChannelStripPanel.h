@@ -5,7 +5,10 @@
 class ChannelStripPanel : public juce::Component
 {
 public:
-    explicit ChannelStripPanel (ChannelStrip& strip);
+    /** @param stripId  Short identifier used to build MIDI-learn param IDs for
+                        this strip's slots: "ch0".."ch3" for the channel strips,
+                        "in" for the pre-FX input channel. */
+    ChannelStripPanel (ChannelStrip& strip, const juce::String& stripId);
     ~ChannelStripPanel() override;
 
     void refresh();
@@ -19,14 +22,26 @@ public:
 
     static constexpr int kSlotHeight = 26;
     static constexpr int kSlotPadding = 2;
-    static constexpr int kMaxVisibleSlots = 8;
+    /** Rack size. Mirrors ChannelStrip::kNumSlots - the panel draws one row per
+        slot, empty or not. */
+    static constexpr int kMaxVisibleSlots = ChannelStrip::kNumSlots;
+
+    /** MIDI-learn param ID for one slot of one strip. Slots are addressed by
+        position, so a footswitch keeps controlling the same spot on the board
+        regardless of which plugin is loaded there. */
+    static juce::String slotBypassParamId (const juce::String& stripId, int slotIndex)
+    {
+        return "slotBypass:" + stripId + ":" + juce::String (slotIndex);
+    }
 
     int getPreferredHeight() const;
 
-    std::function<void()> onAddPluginClicked;
-    /** kind: 0 = NAM amp, 1 = NAM pedal, 2 = cab IR, 3 = space IR. */
-    std::function<void(int kind)> onAddInternalRow;
-    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed)> onPastePlugin;
+    /** Requests a plugin for `slot` (-1 = first free, from the strip's button). */
+    std::function<void(int slot)> onAddPluginClicked;
+    /** kind: 0 = NAM amp, 1 = NAM pedal, 2 = cab IR, 3 = space IR.
+        slot: -1 = first free. */
+    std::function<void(int kind, int slot)> onAddInternalRow;
+    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed, int slot)> onPastePlugin;
 
     juce::Array<PluginAppearanceState> getAppearances() const;
     void setAppearances (const juce::Array<PluginAppearanceState>& appearances);
@@ -59,6 +74,7 @@ private:
     };
 
     ChannelStrip& strip;
+    juce::String  stripId;
     SlotInfo slots[kMaxVisibleSlots];
     int numSlots = 0;
 
@@ -73,6 +89,7 @@ private:
     void rebuildSlots();
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
+    void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
     void showNicknameDialog (int slotIndex);
 
     int  dragSourceSlot = -1;

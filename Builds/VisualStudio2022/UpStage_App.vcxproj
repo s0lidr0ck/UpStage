@@ -3081,7 +3081,7 @@
     <ClInclude Include="..\..\Source\NamIrProcessor.h"/>
     <ClInclude Include="..\..\Source\NamIrEditor.h"/>
     <ClInclude Include="..\..\Source\ImageLoader.h"/>
-    <ClInclude Include="..\..\Source\NamMidiHooks.h"/>
+    <ClInclude Include="..\..\Source\MidiLearnHooks.h"/>
     <ClInclude Include="..\..\Source\AmpLibraryBrowserWindow.h"/>
     <ClInclude Include="..\..\Source\AmpImportDialog.h"/>
     <ClInclude Include="..\..\..\..\..\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>

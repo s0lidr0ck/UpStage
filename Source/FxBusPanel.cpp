@@ -1,4 +1,5 @@
 #include "FxBusPanel.h"
+#include "MidiLearnHooks.h"
 
 //==============================================================================
 FxBusPanel::FxBusPanel (FxBus& b)
@@ -23,7 +24,7 @@ FxBusPanel::FxBusPanel (FxBus& b)
 
     addFxButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2220));
     addFxButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88775a));
-    addFxButton.onClick = [this] { if (onAddPluginClicked) onAddPluginClicked(); };
+    addFxButton.onClick = [this] { if (onAddPluginClicked) onAddPluginClicked (-1); };  // -1 = first free slot
     addAndMakeVisible (addFxButton);
 
     // Master knob (replaces fader)
@@ -85,12 +86,10 @@ FxBusPanel::~FxBusPanel()
 //==============================================================================
 void FxBusPanel::rebuildSlots()
 {
-    int numPlugins = bus.getNumPlugins();
-
     for (int i = 0; i < FxBus::MAX_FX_SLOTS; ++i)
     {
         slots[i].index = i;
-        if (i < numPlugins)
+        if (! bus.isSlotEmpty (i))
         {
             auto* proc = bus.getPlugin (i);
             slots[i].name = (proc != nullptr) ? proc->getName() : "(unknown)";
@@ -239,6 +238,31 @@ void FxBusPanel::paint (juce::Graphics& g)
         };
         groove (slotStartY - 3);
         groove (slotStartY + FxBus::MAX_FX_SLOTS * (kSlotHeight + kSlotPadding) + 1);
+
+    // ---- Drag feedback, matching ChannelStripPanel ----
+    if (dragging && dragTargetSlot >= 0 && dragSourceSlot >= 0 && dragTargetSlot != dragSourceSlot)
+    {
+        int indicatorY = slotStartY + dragTargetSlot * (kSlotHeight + kSlotPadding);
+        if (dragTargetSlot > dragSourceSlot)
+            indicatorY += kSlotHeight;
+
+        g.setColour (juce::Colour (0xff4a90e2));
+        g.fillRect (6, indicatorY - 1, getWidth() - 12, 3);
+
+        juce::Path arrow;
+        arrow.addTriangle (4.0f, (float) indicatorY - 4.0f,
+                           4.0f, (float) indicatorY + 4.0f,
+                           10.0f, (float) indicatorY);
+        g.fillPath (arrow);
+    }
+
+    if (dragging && dragSourceSlot >= 0)
+    {
+        int sy = slotStartY + dragSourceSlot * (kSlotHeight + kSlotPadding);
+        auto sourceRect = juce::Rectangle<int> (6, sy, getWidth() - 12, kSlotHeight);
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.fillRoundedRectangle (sourceRect.toFloat(), 3.0f);
+    }
     }
 
     // ---- Master VOLUME knob: its own bolted sub-plate with corner screws ----
@@ -365,32 +389,86 @@ int FxBusPanel::getSlotAt (int y) const
 
 void FxBusPanel::mouseDown (const juce::MouseEvent& e)
 {
+    doubleClicked = false;
+
     int slotIndex = getSlotAt (e.y);
     if (slotIndex < 0) return;
 
-    if (slots[slotIndex].empty)
-    {
-        if (e.mods.isLeftButtonDown())
-        {
-            if (onAddPluginClicked) onAddPluginClicked();
-        }
-    }
-    else if (e.mods.isLeftButtonDown() && ! e.mods.isRightButtonDown())
-    {
-        bool bp = bus.isPluginBypassed (slotIndex);
-        bus.setPluginBypassed (slotIndex, ! bp);
-        refresh();
-    }
-    else if (e.mods.isRightButtonDown())
+    if (e.mods.isRightButtonDown())
     {
         showSlotContextMenu (slotIndex);
+        return;
     }
+
+    if (slots[slotIndex].empty)
+    {
+        if (onAddPluginClicked) onAddPluginClicked (slotIndex);
+    }
+    else
+    {
+        // Bypass now fires on mouse-UP if the click didn't turn into a drag,
+        // so a drag can start from an occupied slot. Same as the channel strips.
+        dragSourceSlot = slotIndex;
+        dragging = false;
+    }
+}
+
+void FxBusPanel::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    int slotIndex = getSlotAt (e.y);
+    if (slotIndex < 0 || slots[slotIndex].empty) return;
+
+    doubleClicked = true;
+    bus.openPluginEditor (slotIndex);
+}
+
+void FxBusPanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragSourceSlot < 0 || slots[dragSourceSlot].empty) return;
+
+    if (! dragging && e.getDistanceFromDragStart() > 5)
+        dragging = true;
+
+    if (dragging)
+    {
+        int target = getSlotAt (e.y);
+        if (target != dragTargetSlot)
+        {
+            dragTargetSlot = target;
+            repaint();
+        }
+    }
+}
+
+void FxBusPanel::mouseUp (const juce::MouseEvent&)
+{
+    if (dragging && dragSourceSlot >= 0 && dragTargetSlot >= 0
+        && dragSourceSlot != dragTargetSlot
+        && ! bus.isSlotEmpty (dragSourceSlot))
+    {
+        // Swap the two slots. Dropping onto an empty slot moves there; onto an
+        // occupied one, the two trade places. Nothing else in the rack moves.
+        bus.swapSlots (dragSourceSlot, dragTargetSlot);
+        refresh();
+    }
+    else if (! dragging && ! doubleClicked && dragSourceSlot >= 0
+             && ! slots[dragSourceSlot].empty)
+    {
+        bool bp = bus.isPluginBypassed (dragSourceSlot);
+        bus.setPluginBypassed (dragSourceSlot, ! bp);
+        refresh();
+    }
+
+    dragSourceSlot = -1;
+    dragTargetSlot = -1;
+    dragging = false;
+    repaint();
 }
 
 void FxBusPanel::showSlotContextMenu (int slotIndex)
 {
     juce::PopupMenu menu;
-    bool hasPlugin = slotIndex >= 0 && slotIndex < bus.getNumPlugins() && ! slots[slotIndex].empty;
+    bool hasPlugin = slotIndex >= 0 && ! bus.isSlotEmpty (slotIndex);
     auto& clipboard = ChannelStripPanel::getClipboard();
     bool clipboardHasData = clipboard.pluginIdentifier.isNotEmpty();
 
@@ -411,12 +489,17 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
             menu.addItem (11, samePlugin ? "Paste Settings" : "Paste (Replace)");
         }
         menu.addSeparator();
+        menu.addItem (4, "Move Up",   slotIndex > 0);
+        menu.addItem (5, "Move Down", slotIndex < bus.getNumSlots() - 1);
+        menu.addSeparator();
         menu.addItem (3, "Remove");
+        addSlotMidiItems (menu, slotIndex);
     }
     else
     {
         if (clipboardHasData)
             menu.addItem (11, "Paste");
+        addSlotMidiItems (menu, slotIndex);
     }
 
     menu.showMenuAsync ({}, [this, slotIndex, hasPlugin] (int result)
@@ -435,8 +518,35 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                 bus.removePlugin (slotIndex);
                 refresh();
                 break;
+
+            case 4:
+                bus.swapSlots (slotIndex, slotIndex - 1);
+                refresh();
+                break;
+            case 5:
+                bus.swapSlots (slotIndex, slotIndex + 1);
+                refresh();
+                break;
             case 6:
                 showNicknameDialog (slotIndex);
+                break;
+
+            case 30:
+                if (MidiLearnHooks::beginLearn)
+                    MidiLearnHooks::beginLearn (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex), 0.0f, 1.0f);
+                break;
+
+            case 31:
+                if (MidiLearnHooks::clearBinding)
+                    MidiLearnHooks::clearBinding (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex));
+                break;
+
+            case 32: case 33: case 34:
+                if (MidiLearnHooks::setSwitchType)
+                    MidiLearnHooks::setSwitchType (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex), result - 32);
                 break;
 
             case 10:
@@ -467,7 +577,7 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                 }
                 else if (onPastePlugin)
                 {
-                    onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                    onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed, slotIndex);
                 }
                 refresh();
                 break;
@@ -477,9 +587,35 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
     });
 }
 
+void FxBusPanel::addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const
+{
+    if (! MidiLearnHooks::beginLearn) return;
+
+    const auto pid = ChannelStripPanel::slotBypassParamId ("fx", slotIndex);
+    const int  cc  = MidiLearnHooks::getCc ? MidiLearnHooks::getCc (pid) : -1;
+
+    menu.addSeparator();
+    menu.addItem (30, cc >= 0 ? "Learn MIDI (re-learn, now CC " + juce::String (cc) + ")"
+                              : "Learn MIDI");
+    menu.addItem (31, "Clear MIDI binding", cc >= 0);
+
+    if (cc >= 0)
+    {
+        // Latching and Momentary send identical CC streams, so the right one
+        // can't be detected - it has to be picked. Latching is the default.
+        const int type = MidiLearnHooks::getSwitchType
+                       ? MidiLearnHooks::getSwitchType (pid) : 0;
+        juce::PopupMenu modeMenu;
+        modeMenu.addItem (32, "Latching (alternates 0 / 127)",        true, type == 0);
+        modeMenu.addItem (33, "Momentary (127 held, 0 released)",     true, type == 1);
+        modeMenu.addItem (34, "Single value (same value each press)", true, type == 2);
+        menu.addSubMenu ("MIDI Switch Type", modeMenu);
+    }
+}
+
 void FxBusPanel::showNicknameDialog (int slotIndex)
 {
-    if (slotIndex < 0 || slotIndex >= bus.getNumPlugins()) return;
+    if (slotIndex < 0 || bus.isSlotEmpty (slotIndex)) return;
 
     auto* aw = new juce::AlertWindow ("Plugin Nickname",
                                        "Enter a display name for this plugin.\nLeave blank to use the original name.",
@@ -491,7 +627,7 @@ void FxBusPanel::showNicknameDialog (int slotIndex)
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
         [this, slotIndex, aw] (int result)
         {
-            if (result == 1 && slotIndex < bus.getNumPlugins())
+            if (result == 1 && ! bus.isSlotEmpty (slotIndex))
             {
                 auto nick = aw->getTextEditorContents ("nickname").trim();
                 slots[slotIndex].nickname = nick;

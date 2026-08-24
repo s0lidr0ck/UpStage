@@ -5,8 +5,14 @@
 /**
  * ChannelStrip
  *
- * Owns a chain of VST3 plugins (AudioProcessorGraph nodes).
- * Audio flows: input → [vst3_0 → vst3_1 → ... → vst3_N] → output
+ * Owns a fixed rack of kNumSlots plugin slots, each either holding a plugin or
+ * empty. Audio flows through the occupied slots in slot order, skipping empties:
+ * input → [slot0 → slot1 → ... → slotN] → output
+ *
+ * Slots are FIXED positions, not a packed list. Removing the plugin in slot 3
+ * empties slot 3; it does not shift slots 4+ up. This matches how the strip is
+ * drawn (a rack of slots), and keeps position-addressed MIDI slot bindings
+ * pointing at the same spot on the board when a plugin above them is removed.
  *
  * When inactive the strip is bypassed (silence passed to output).
  * Each plugin can be individually bypassed via isBypassed.
@@ -28,31 +34,48 @@ public:
     void setPlayHead (juce::AudioPlayHead* ph) { playHead = ph; }
 
     //==========================================================================
+    // Slots
+    /** Number of plugin slots per strip. A fixed rack, not a growing list. */
+    static constexpr int kNumSlots = 12;
+
+    int  getNumSlots() const { return kNumSlots; }
+
+    /** True when nothing is loaded in that slot (or the index is out of range). */
+    bool isSlotEmpty (int slot) const;
+
+    /** Lowest-numbered empty slot, or -1 when the rack is full. */
+    int  findFirstFreeSlot() const;
+
+    //==========================================================================
     // Plugin management
-    /** Load a VST3 plugin by its PluginDescription. Appends to chain. */
+    /** Load a VST3 plugin by its PluginDescription into `slot`.
+        slot = -1 uses the first free slot. Fails (callback false) when the
+        requested slot is taken or the rack is full. */
     bool addPlugin (const juce::PluginDescription& desc,
+                    int slot,
                     std::function<void(bool success)> callback);
 
-    /** Append an internal NAM row. Appends via the message queue (same FIFO
-        the async VST3 loads use) so chain order is preserved when projects
-        restore mixed chains. Kinds: 0 = amp head, 1 = pedal, 2 = cab IR,
-        3 = space IR. */
-    void addInternalRow (int kind, std::function<void(bool success)> callback = nullptr);
+    /** Place an internal NAM row in `slot` (-1 = first free). Goes through the
+        message queue (the same FIFO the async VST3 loads use) so a restore that
+        mixes internal rows and VST3s still lands each one in its own slot.
+        Kinds: 0 = amp head, 1 = pedal, 2 = cab IR, 3 = space IR. */
+    void addInternalRow (int kind, int slot,
+                         std::function<void(bool success)> callback = nullptr);
 
-    /** Convenience: addInternalRow (0). Kept for the existing call sites. */
+    /** Convenience: addInternalRow (0, -1). Kept for the existing call sites. */
     void addAmp (std::function<void(bool success)> callback = nullptr)
     {
-        addInternalRow (0, std::move (callback));
+        addInternalRow (0, -1, std::move (callback));
     }
 
-    /** Remove plugin at position in chain. */
-    void removePlugin (int chainIndex);
+    /** Empty one slot. Neighbouring slots are untouched. */
+    void removePlugin (int slot);
 
-    /** Remove all plugins from the chain. */
+    /** Empty every slot. */
     void clearAllPlugins();
 
-    /** Move plugin within chain. */
-    void movePlugin (int fromIndex, int toIndex);
+    /** Exchange the contents of two slots. Either may be empty. */
+    void swapSlots (int slotA, int slotB);
 
     /** Open the plugin's custom editor window. */
     void openPluginEditor (int chainIndex);
@@ -60,12 +83,16 @@ public:
     /** Bypass a plugin in the chain (audio still flows but plugin is skipped). */
     void setPluginBypassed (int chainIndex, bool bypassed);
 
-    /** Returns true if the plugin at chainIndex is currently bypassed.
-        Returns false for out-of-range indices. */
-    bool isPluginBypassed (int chainIndex) const;
+    /** Returns true if the plugin at `slot` is currently bypassed.
+        Returns false for empty or out-of-range slots. */
+    bool isPluginBypassed (int slot) const;
 
+    /** How many slots are occupied. NOT a bound for slot indices - use
+        getNumSlots() for that. Occupied slots need not be contiguous. */
     int getNumPlugins() const;
-    juce::AudioProcessor* getPlugin (int chainIndex) const;
+
+    /** The plugin in `slot`, or nullptr when the slot is empty. */
+    juce::AudioProcessor* getPlugin (int slot) const;
 
     struct PluginEntry
     {
@@ -87,10 +114,11 @@ public:
         juce::Component::SafePointer<juce::DocumentWindow> editorWindow;
     };
 
-    const PluginEntry& getPluginEntry (int chainIndex) const;
+    /** The entry in `slot`, or nullptr when the slot is empty. */
+    const PluginEntry* getPluginEntry (int slot) const;
 
     /** Sets the per-slot nickname + tint (message thread). */
-    void setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname);
+    void setPluginAppearance (int slot, juce::Colour tint, const juce::String& nickname);
 
     //==========================================================================
     // Processing
@@ -141,8 +169,17 @@ private:
     juce::AudioPluginFormatManager& formatManager;
 
     juce::AudioPlayHead*      playHead = nullptr;
+
+    /** Exactly kNumSlots entries at all times; nullptr means an empty slot.
+        Never resized after construction, so a slot index is stable. */
     juce::Array<PluginEntry*> pluginChain;
     juce::CriticalSection     chainLock;
+
+    /** Install `entry` into `slot` (-1 = first free) and fire the callback.
+        Takes ownership; deletes the entry and reports false when there is no
+        room. Message thread only. */
+    bool placeEntry (PluginEntry* entry, int slot,
+                     const std::function<void(bool success)>& callback);
 
     /** Close any open editor window, then delete the entry (and its plugin).
         MUST be called on the message thread and with the entry already removed

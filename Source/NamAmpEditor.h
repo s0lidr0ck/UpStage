@@ -5,7 +5,7 @@
 #include "AmpLibrary.h"
 #include "MixerLookAndFeel.h"
 #include "ImageLoader.h"
-#include "NamMidiHooks.h"
+#include "MidiLearnHooks.h"
 
 /** Rotary that owns its right-click: pops the MIDI-learn menu instead of
     letting the Slider react to the button. */
@@ -28,20 +28,20 @@ struct NamMidiKnob : public juce::Slider
     and IR editors. */
 inline void showNamMidiMenu (const juce::String& paramID, float minV, float maxV)
 {
-    if (! NamMidiHooks::beginLearn)
+    if (! MidiLearnHooks::beginLearn)
         return;
 
-    const int cc = NamMidiHooks::getCc ? NamMidiHooks::getCc (paramID) : -1;
+    const int cc = MidiLearnHooks::getCc ? MidiLearnHooks::getCc (paramID) : -1;
     juce::PopupMenu m;
     m.addItem (1, cc >= 0 ? "MIDI Learn (bound to CC " + juce::String (cc) + ")"
                           : "MIDI Learn");
     m.addItem (2, "Clear MIDI binding", cc >= 0);
     m.showMenuAsync ({}, [paramID, minV, maxV] (int r)
     {
-        if (r == 1 && NamMidiHooks::beginLearn)
-            NamMidiHooks::beginLearn (paramID, minV, maxV);
-        else if (r == 2 && NamMidiHooks::clearBinding)
-            NamMidiHooks::clearBinding (paramID);
+        if (r == 1 && MidiLearnHooks::beginLearn)
+            MidiLearnHooks::beginLearn (paramID, minV, maxV);
+        else if (r == 2 && MidiLearnHooks::clearBinding)
+            MidiLearnHooks::clearBinding (paramID);
     });
 }
 

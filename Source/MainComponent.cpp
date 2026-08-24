@@ -2,7 +2,7 @@
 #include "MixerLookAndFeel.h"
 #include "NamAmpProcessor.h"
 #include "NamIrProcessor.h"
-#include "NamMidiHooks.h"
+#include "MidiLearnHooks.h"
 #include "AmpImportDialog.h"
 #include <windows.h>
 #include <psapi.h>
@@ -55,18 +55,28 @@ MainComponent::MainComponent() : menuBar (this)
 
     // NAM editor knobs reach MIDI learn through these hooks (the editors live
     // in their own windows and don't know the app).
-    NamMidiHooks::beginLearn = [this] (const juce::String& pid, float mn, float mx)
+    MidiLearnHooks::beginLearn = [this] (const juce::String& pid, float mn, float mx)
     {
         midiLearnManager.registerParameter (pid, mn, mx);
         midiLearnManager.beginLearning (pid);
     };
-    NamMidiHooks::clearBinding = [this] (const juce::String& pid)
+    MidiLearnHooks::clearBinding = [this] (const juce::String& pid)
     {
         midiLearnManager.clearBinding (pid);
     };
-    NamMidiHooks::getCc = [this] (const juce::String& pid)
+    MidiLearnHooks::getCc = [this] (const juce::String& pid)
     {
         return midiLearnManager.getCcForParam (pid);
+    };
+    MidiLearnHooks::getSwitchType = [this] (const juce::String& pid)
+    {
+        return (int) midiLearnManager.getSwitchType (pid);
+    };
+    MidiLearnHooks::setSwitchType = [this] (const juce::String& pid, int type)
+    {
+        midiLearnManager.setSwitchType (
+            pid, (MidiLearnManager::Binding::SwitchType) type);
+        projectDirty = true;
     };
     midiLearnManager.registerParameter ("loopVolume",  0.0f,  1.0f);
     midiLearnManager.registerParameter ("gateThresh", -80.0f, 0.0f);
@@ -81,6 +91,16 @@ MainComponent::MainComponent() : menuBar (this)
     midiLearnManager.registerParameter ("masterFader",  -60.0f, 12.0f);
     midiLearnManager.registerParameter ("fxBypass",       0.0f,  1.0f);
     midiLearnManager.registerParameter ("metroToggle",    0.0f,  1.0f);
+
+    // Momentary targets - each rising edge of the CC is one press.
+    midiLearnManager.registerParameter ("tapTempo",       0.0f,  1.0f);
+
+    // Per-slot on/off, addressed by position so a footswitch keeps controlling
+    // the same spot on the board whatever gets loaded there.
+    for (const auto& stripId : { "ch0", "ch1", "ch2", "ch3", "in", "fx" })
+        for (int slot = 0; slot < ChannelStripPanel::kMaxVisibleSlots; ++slot)
+            midiLearnManager.registerParameter (
+                ChannelStripPanel::slotBypassParamId (stripId, slot), 0.0f, 1.0f);
 
     //==========================================================================
     addAndMakeVisible (menuBar);
@@ -419,23 +439,25 @@ MainComponent::MainComponent() : menuBar (this)
         addAndMakeVisible (inputTrimKnobs[i]);
 
         // Plugin chain panel
-        channelStripPanels[i] = std::make_unique<ChannelStripPanel> (*channels[i]);
-        channelStripPanels[i]->onAddPluginClicked = [this, i] { showAddPluginMenu (i); };
-        channelStripPanels[i]->onAddInternalRow = [this, i] (int kind)
+        channelStripPanels[i] = std::make_unique<ChannelStripPanel> (*channels[i], "ch" + juce::String (i));
+        channelStripPanels[i]->onAddPluginClicked = [this, i] (int slot) { showAddPluginMenu (i, slot); };
+        channelStripPanels[i]->onAddInternalRow = [this, i] (int kind, int slot)
         {
-            channels[i]->addInternalRow (kind, [this, i] (bool)
+            channels[i]->addInternalRow (kind, slot, [this, i] (bool ok)
             {
+                if (! ok) warnRackFull();
                 channelStripPanels[i]->refresh();
             });
         };
-        channelStripPanels[i]->onPastePlugin = [this, i] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+        channelStripPanels[i]->onPastePlugin = [this, i] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed, int slot)
         {
             if (auto found = knownPluginList.getTypeForIdentifierString (id))
             {
-                channels[i]->addPlugin (*found, [this, i, state, bypassed] (bool ok)
+                // Paste replaces whatever is in the target slot, in place.
+                channels[i]->removePlugin (slot);
+                channels[i]->addPlugin (*found, slot, [this, i, state, bypassed, slot] (bool ok)
                 {
-                    if (! ok) return;
-                    int slot = channels[i]->getNumPlugins() - 1;
+                    if (! ok) { warnRackFull(); return; }
                     if (state.getSize() > 0)
                         if (auto* proc = channels[i]->getPlugin (slot))
                             proc->setStateInformation (state.getData(), (int) state.getSize());
@@ -502,23 +524,24 @@ MainComponent::MainComponent() : menuBar (this)
     inputChannelMeterOut = std::make_unique<LevelMeter> (LevelMeter::Orientation::Vertical);
     addAndMakeVisible (*inputChannelMeterOut);
 
-    inputChannelPanel = std::make_unique<ChannelStripPanel> (*inputChannel);
-    inputChannelPanel->onAddPluginClicked = [this] { showAddPluginMenu (-1); };
-    inputChannelPanel->onAddInternalRow = [this] (int kind)
+    inputChannelPanel = std::make_unique<ChannelStripPanel> (*inputChannel, "in");
+    inputChannelPanel->onAddPluginClicked = [this] (int slot) { showAddPluginMenu (-1, slot); };
+    inputChannelPanel->onAddInternalRow = [this] (int kind, int slot)
     {
-        inputChannel->addInternalRow (kind, [this] (bool)
+        inputChannel->addInternalRow (kind, slot, [this] (bool ok)
         {
+            if (! ok) warnRackFull();
             inputChannelPanel->refresh();
         });
     };
-    inputChannelPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+    inputChannelPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed, int slot)
     {
         if (auto found = knownPluginList.getTypeForIdentifierString (id))
         {
-            inputChannel->addPlugin (*found, [this, state, bypassed] (bool ok)
+            inputChannel->removePlugin (slot);
+            inputChannel->addPlugin (*found, slot, [this, state, bypassed, slot] (bool ok)
             {
-                if (! ok) return;
-                int slot = inputChannel->getNumPlugins() - 1;
+                if (! ok) { warnRackFull(); return; }
                 if (state.getSize() > 0)
                     if (auto* proc = inputChannel->getPlugin (slot))
                         proc->setStateInformation (state.getData(), (int) state.getSize());
@@ -532,7 +555,7 @@ MainComponent::MainComponent() : menuBar (this)
     addInputPluginButton.setButtonText ("+ Add Plugin");
     addInputPluginButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2220));
     addInputPluginButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88775a));
-    addInputPluginButton.onClick = [this] { showAddPluginMenu (-1); };
+    addInputPluginButton.onClick = [this] { showAddPluginMenu (-1, -1); };
     addAndMakeVisible (addInputPluginButton);
 
     // Input direct knob (sends post-input-FX signal directly to master mix)
@@ -599,15 +622,15 @@ MainComponent::MainComponent() : menuBar (this)
 
     // FX Bus panel
     fxBusPanel = std::make_unique<FxBusPanel> (*fxBus);
-    fxBusPanel->onAddPluginClicked = [this] { showAddPluginMenuForFxBus(); };
-    fxBusPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+    fxBusPanel->onAddPluginClicked = [this] (int slot) { showAddPluginMenuForFxBus (slot); };
+    fxBusPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed, int slot)
     {
         if (auto found = knownPluginList.getTypeForIdentifierString (id))
         {
-            fxBus->addPlugin (*found, [this, state, bypassed] (bool ok)
+            fxBus->removePlugin (slot);
+            fxBus->addPlugin (*found, slot, [this, state, bypassed, slot] (bool ok)
             {
-                if (! ok) return;
-                int slot = fxBus->getNumPlugins() - 1;
+                if (! ok) { warnRackFull(); return; }
                 if (state.getSize() > 0)
                     if (auto* proc = fxBus->getPlugin (slot))
                         proc->setStateInformation (state.getData(), (int) state.getSize());
@@ -845,6 +868,10 @@ MainComponent::MainComponent() : menuBar (this)
 
     // Map learnable on-screen controls to their MidiLearnManager paramIDs (#2/#6).
     learnableControls[&inputTrimSlider]  = "inputTrim";
+    learnableControls[&tapButton]        = "tapTempo";
+    // Buttons only get Button::Listener above; the generic right-click Learn
+    // MIDI path in mouseDown needs a mouse listener as well.
+    tapButton.addMouseListener (this, false);
     learnableControls[&loopVolumeSlider] = "loopVolume";
     learnableControls[&gateThreshSlider] = "gateThresh";
     for (int i = 0; i < NUM_CHANNELS; ++i)
@@ -1721,13 +1748,18 @@ void MainComponent::paint (juce::Graphics& g)
 
 void MainComponent::mouseDown (const juce::MouseEvent& e)
 {
+    // Recorded before anything else so buttonClicked() (which fires later, on
+    // mouse-up) can tell a real tap from a right-click on the TAP button.
+    if (e.eventComponent == &tapButton)
+        tapClickWasRightButton = e.mods.isRightButtonDown();
+
     // Check if click was on a channel label
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
         if (e.eventComponent == &channelLabels[i])
         {
             if (e.mods.isRightButtonDown())
-                showChannelRenameDialog (i);   // right-click: rename
+                showChannelContextMenu (i);    // right-click: rename / copy / paste
             else
                 setActiveChannel (i);          // left-click: select
             return;
@@ -1823,13 +1855,33 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         {
             const bool armed = midiLearnManager.isLearning()
                              && midiLearnManager.getLearningParam() == pid;
+            const int cc = midiLearnManager.getCcForParam (pid);
             juce::PopupMenu m;
             m.addItem (1, armed ? "Listening for CC..." : "Learn MIDI");
-            m.addItem (2, "Clear MIDI binding", midiLearnManager.getCcForParam (pid) >= 0);
+            m.addItem (2, "Clear MIDI binding", cc >= 0);
+
+            // Switch-type targets need to know what kind of switch is bound -
+            // it can't be told from the CC stream.
+            if (cc >= 0 && pid == "tapTempo")
+            {
+                const int type = (int) midiLearnManager.getSwitchType (pid);
+                juce::PopupMenu modeMenu;
+                modeMenu.addItem (3, "Latching (alternates 0 / 127)",      true, type == 0);
+                modeMenu.addItem (4, "Momentary (127 held, 0 released)",   true, type == 1);
+                modeMenu.addItem (5, "Single value (same value each press)", true, type == 2);
+                m.addSubMenu ("MIDI Switch Type", modeMenu);
+            }
+
             m.showMenuAsync ({}, [this, pid] (int r)
             {
                 if (r == 1) { midiLearnManager.beginLearning (pid); repaint(); }
                 else if (r == 2) { midiLearnManager.clearBinding (pid); repaint(); }
+                else if (r >= 3 && r <= 5)
+                {
+                    midiLearnManager.setSwitchType (
+                        pid, (MidiLearnManager::Binding::SwitchType) (r - 3));
+                    projectDirty = true;
+                }
             });
             return;
         }
@@ -1954,6 +2006,95 @@ void MainComponent::swapChannels (int a, int b)
     resized();
 }
 
+//==============================================================================
+void MainComponent::showChannelContextMenu (int channelIndex)
+{
+    if (! juce::isPositiveAndBelow (channelIndex, NUM_CHANNELS)) return;
+
+    const auto thisName = channelLabels[channelIndex].getText();
+
+    juce::PopupMenu menu;
+    menu.addItem (1, "Rename...");
+    menu.addSeparator();
+    menu.addItem (2, "Copy Channel");
+    menu.addItem (3, channelClipboard.valid
+                        ? "Paste Channel (from \"" + channelClipboard.state.name + "\")"
+                        : "Paste Channel",
+                  channelClipboard.valid);
+
+    menu.showMenuAsync ({}, [this, channelIndex] (int result)
+    {
+        if (result == 1)      showChannelRenameDialog     (channelIndex);
+        else if (result == 2) copyChannelToClipboard      (channelIndex);
+        else if (result == 3) pasteChannelFromClipboard   (channelIndex);
+    });
+}
+
+void MainComponent::copyChannelToClipboard (int channelIndex)
+{
+    if (! juce::isPositiveAndBelow (channelIndex, NUM_CHANNELS)) return;
+
+    // getState() pulls the whole chain including each plugin's own state blob,
+    // so the copy is a full snapshot rather than a list of plugin names.
+    channelClipboard.state    = channels[channelIndex]->getState();
+    channelClipboard.state.name = channelLabels[channelIndex].getText();
+    channelClipboard.muted    = channelMuted[channelIndex];
+    channelClipboard.soloed   = channelSoloed[channelIndex];
+    channelClipboard.faderDb  = outputFaders[channelIndex].getValue();
+    channelClipboard.panKnob  = outputGainKnobs[channelIndex].getValue();
+    channelClipboard.trimKnob = inputTrimKnobs[channelIndex].getValue();
+    channelClipboard.valid    = true;
+}
+
+void MainComponent::pasteChannelFromClipboard (int channelIndex)
+{
+    if (! channelClipboard.valid) return;
+    if (! juce::isPositiveAndBelow (channelIndex, NUM_CHANNELS)) return;
+
+    const auto& cb = channelClipboard;
+
+    // ---- Wipe the destination chain (closes its editor windows too) ----
+    channels[channelIndex]->clearAllPlugins();
+    channelStripPanels[channelIndex]->refresh();
+
+    // ---- Mixer state ----
+    const auto newName = cb.state.name + " (copy)";
+    channelLabels[channelIndex].setText (newName, juce::dontSendNotification);
+    channels[channelIndex]->setName (newName);
+
+    outputFaders[channelIndex]   .setValue (cb.faderDb,  juce::dontSendNotification);
+    outputGainKnobs[channelIndex].setValue (cb.panKnob,  juce::dontSendNotification);
+    inputTrimKnobs[channelIndex] .setValue (cb.trimKnob, juce::dontSendNotification);
+
+    // The knobs above are set silently, so push their values to the strip here.
+    channels[channelIndex]->setOutputGain (juce::Decibels::decibelsToGain ((float) cb.faderDb));
+    channels[channelIndex]->setInputGain  (juce::Decibels::decibelsToGain ((float) cb.trimKnob));
+    channels[channelIndex]->setPan        ((float) cb.panKnob);
+    updateFaderLabel (channelIndex);
+
+    channelMuted[channelIndex]  = cb.muted;
+    channelSoloed[channelIndex] = cb.soloed;
+    muteButtons[channelIndex].setToggleState (cb.muted,  juce::dontSendNotification);
+    soloButtons[channelIndex].setToggleState (cb.soloed, juce::dontSendNotification);
+    updateActiveIndicators();
+
+    projectDirty = true;
+
+    // ---- Rebuild the chain (VST3s load asynchronously) ----
+    if (cb.state.plugins.isEmpty())
+        return;
+
+    pendingPluginLoads += cb.state.plugins.size();
+    loadingOverlay.show (this, "Pasting channel...");
+
+    restoreChainInto (*channels[channelIndex], cb.state, [this, channelIndex]
+    {
+        channelStripPanels[channelIndex]->refresh();
+        if (--pendingPluginLoads <= 0)
+            loadingOverlay.dismiss();
+    });
+}
+
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     // Ctrl+Shift+S = Save as Song
@@ -1998,9 +2139,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     // Numpad 0 = Tap tempo
     if (key.getKeyCode() == juce::KeyPress::numberPad0)
     {
-        double bpm = tapTempo.tap();
-        if (bpm > 0.0)
-            bpmLabel.setText (juce::String ((int) bpm) + " BPM", juce::dontSendNotification);
+        doTap();
         return true;
     }
 
@@ -2199,7 +2338,8 @@ void MainComponent::resized()
         inputChannelLabel.setBounds (strip.removeFromTop (28));
         strip.removeFromTop (2);
 
-        auto pluginArea = strip.removeFromTop (230);
+        // Same rack height as the channel strips, so all five racks line up.
+        auto pluginArea = strip.removeFromTop (inputChannelPanel->getPreferredHeight());
         inputChannelPanel->setBounds (pluginArea);
         addInputPluginButton.setVisible (false);
         strip.removeFromTop (4);
@@ -2242,8 +2382,10 @@ void MainComponent::resized()
         channelLabels[i].setBounds (strip.removeFromTop (28));
         strip.removeFromTop (2);
 
-        // Plugin chain panel at top (slots handle add-plugin clicks)
-        auto pluginArea = strip.removeFromTop (230);
+        // Plugin chain panel at top (slots handle add-plugin clicks). Height
+        // follows the slot count; the meters/fader row below is sized from
+        // whatever is left, so the fader absorbs the difference.
+        auto pluginArea = strip.removeFromTop (channelStripPanels[i]->getPreferredHeight());
         channelStripPanels[i]->setBounds (pluginArea);
         addPluginButtons[i].setVisible (false);
         strip.removeFromTop (4);
@@ -2426,9 +2568,9 @@ void MainComponent::buttonClicked (juce::Button* b)
     // Tap tempo
     else if (b == &tapButton)
     {
-        double bpm = tapTempo.tap();
-        if (bpm > 0.0)
-            bpmLabel.setText (juce::String ((int) bpm) + " BPM", juce::dontSendNotification);
+        // A right-click opened the Learn MIDI menu - don't also tap.
+        if (! tapClickWasRightButton)
+            doTap();
     }
     else if (b == &clockToggle)
     {
@@ -2510,7 +2652,7 @@ void MainComponent::buttonClicked (juce::Button* b)
     // Channel strip controls
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
-        if (b == &addPluginButtons[i]) { showAddPluginMenu (i); return; }
+        if (b == &addPluginButtons[i]) { showAddPluginMenu (i, -1); return; }
     }
 
     // Scene recall / capture
@@ -2765,11 +2907,135 @@ void MainComponent::timerCallback()
 }
 
 //==============================================================================
+bool MainComponent::isRisingEdge (const juce::String& paramID, float value)
+{
+    const bool nowPressed = value >= 0.5f;
+    const bool wasPressed = momentaryPressed[paramID];
+    momentaryPressed[paramID] = nowPressed;
+    return nowPressed && ! wasPressed;
+}
+
+bool MainComponent::isSwitchPress (const juce::String& paramID, float value)
+{
+    // Keep the edge state fresh either way, so flipping modes mid-session can't
+    // leave a stale "was pressed" behind.
+    const bool risingEdge = isRisingEdge (paramID, value);
+
+    // A momentary switch sends 127 on press and 0 on release, so only the
+    // rising edge is a press. Latching and single-value switches send one
+    // message per press, so EVERY message is a press - filtering for a rising
+    // edge there would swallow every other press.
+    using ST = MidiLearnManager::Binding::SwitchType;
+    return midiLearnManager.getSwitchType (paramID) == ST::Momentary ? risingEdge : true;
+}
+
+bool MainComponent::resolveSlot (const juce::String& stripId, int slotIndex,
+                                 ChannelStrip*& strip, ChannelStripPanel*& panel)
+{
+    strip = nullptr;
+    panel = nullptr;
+
+    if (stripId == "in")
+    {
+        strip = inputChannel.get();
+        panel = inputChannelPanel.get();
+    }
+    else if (stripId.startsWith ("ch"))
+    {
+        const int ch = stripId.substring (2).getIntValue();
+        if (! juce::isPositiveAndBelow (ch, NUM_CHANNELS)) return false;
+        strip = channels[ch].get();
+        panel = channelStripPanels[ch].get();
+    }
+
+    return strip != nullptr && ! strip->isSlotEmpty (slotIndex);
+}
+
+void MainComponent::setSlotBypassed (const juce::String& stripId, int slotIndex, bool bypassed)
+{
+    if (stripId == "fx")
+    {
+        if (fxBus->isSlotEmpty (slotIndex)) return;
+        fxBus->setPluginBypassed (slotIndex, bypassed);
+        if (fxBusPanel) fxBusPanel->refresh();
+        return;
+    }
+
+    ChannelStrip*      strip = nullptr;
+    ChannelStripPanel* panel = nullptr;
+    if (! resolveSlot (stripId, slotIndex, strip, panel)) return;
+
+    strip->setPluginBypassed (slotIndex, bypassed);
+    if (panel != nullptr) panel->refresh();
+}
+
+bool MainComponent::isSlotBypassed (const juce::String& stripId, int slotIndex)
+{
+    if (stripId == "fx")
+        return ! fxBus->isSlotEmpty (slotIndex) && fxBus->isPluginBypassed (slotIndex);
+
+    ChannelStrip*      strip = nullptr;
+    ChannelStripPanel* panel = nullptr;
+    if (! resolveSlot (stripId, slotIndex, strip, panel)) return false;
+
+    return strip->isPluginBypassed (slotIndex);
+}
+
+void MainComponent::doTap()
+{
+    const double bpm = tapTempo.tap();
+    if (bpm > 0.0)
+        bpmLabel.setText (juce::String ((int) bpm) + " BPM", juce::dontSendNotification);
+}
+
 void MainComponent::midiLearnParameterChanged (const juce::String& paramID, float value)
 {
     if (paramID.startsWith ("nam:"))
     {
         applyNamMidiParam (paramID, value);
+        return;
+    }
+
+    // ---- Switch targets: act once per physical press ----
+    if (paramID == "tapTempo")
+    {
+        if (isSwitchPress (paramID, value))
+            doTap();
+        return;
+    }
+
+    if (paramID.startsWith ("slotBypass:"))
+    {
+        // "slotBypass:<strip>:<slot>"
+        const auto body  = paramID.fromFirstOccurrenceOf (":", false, false);
+        const auto strip = body.upToLastOccurrenceOf (":", false, false);
+        const int  slot  = body.fromLastOccurrenceOf (":", false, false).getIntValue();
+
+        const bool risingEdge = isRisingEdge (paramID, value);
+
+        using ST = MidiLearnManager::Binding::SwitchType;
+        switch (midiLearnManager.getSwitchType (paramID))
+        {
+            case ST::Momentary:
+                // No state of its own, and it reports the release too, so only
+                // the press counts. We hold the state and flip on each press.
+                if (risingEdge)
+                    setSlotBypassed (strip, slot, ! isSlotBypassed (strip, slot));
+                break;
+
+            case ST::SingleValue:
+                // Sends the same value every press, so the value says nothing.
+                // Every message is one press: flip on each.
+                setSlotBypassed (strip, slot, ! isSlotBypassed (strip, slot));
+                break;
+
+            case ST::Latching:
+            default:
+                // The switch holds its own state, so mirror it: 127 = effect on.
+                // Self-syncing - the switch's LED and the slot can't drift apart.
+                setSlotBypassed (strip, slot, value < 0.5f);
+                break;
+        }
         return;
     }
 
@@ -3208,112 +3474,46 @@ void MainComponent::loadProjectData (const ProjectData& data)
     }
 }
 
-void MainComponent::loadProjectPlugins (const ProjectData& data)
+void MainComponent::restoreChainInto (ChannelStrip& strip,
+                                      const ChannelState& state,
+                                      std::function<void()> onSlotLoaded)
 {
-    // Load channel plugins
-    for (int i = 0; i < NUM_CHANNELS; ++i)
+    auto* target = &strip;
+
+    for (int slotIndex = 0; slotIndex < state.plugins.size(); ++slotIndex)
     {
-        for (int slotIndex = 0; slotIndex < data.channels[i].plugins.size(); ++slotIndex)
+        const auto& slot = state.plugins.getReference (slotIndex);
+
+        const juce::MemoryBlock blob     = slot.stateData;
+        const bool              bypassed = slot.isBypassed;
+        const juce::Colour      tint     = slot.tint;
+        const juce::String      nick     = slot.nickname;
+
+        // Projects saved before fixed slots carry no slot number; those load
+        // packed from the top, which is exactly where they used to sit.
+        const int               slotIdx  = slot.slotIndex >= 0 ? slot.slotIndex : slotIndex;
+
+        // Fires on the message thread once the slot has landed (or failed).
+        auto applyAndNotify = [target, slotIdx, blob, bypassed, tint, nick, onSlotLoaded] (bool ok)
         {
-            const auto& slot = data.channels[i].plugins.getReference (slotIndex);
-
-            if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier
-                || slot.pluginIdentifier == NamIrProcessor::kIdentifier)
+            if (ok)
             {
-                juce::MemoryBlock ampBlob = slot.stateData;
-                bool ampBypassed = slot.isBypassed;
-                juce::Colour ampTint = slot.tint;
-                juce::String ampNick = slot.nickname;
-                int ampChan = i, ampSlot = slotIndex;
-                // Role restores from the state blob; kind here only picks the class.
-                const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
-
-                channels[i]->addInternalRow (rowKind, [this, ampChan, ampSlot, ampBlob, ampBypassed, ampTint, ampNick] (bool ok)
-                {
-                    if (ok)
-                    {
-                        if (ampBlob.getSize() > 0)
-                            if (auto* proc = channels[ampChan]->getPlugin (ampSlot))
-                                proc->setStateInformation (ampBlob.getData(), (int) ampBlob.getSize());
-                        channels[ampChan]->setPluginBypassed (ampSlot, ampBypassed);
-                        channels[ampChan]->setPluginAppearance (ampSlot, ampTint, ampNick);
-                    }
-                    juce::MessageManager::callAsync ([this, ampChan] {
-                        channelStripPanels[ampChan]->refresh();
-                        if (--pendingPluginLoads <= 0)
-                            loadingOverlay.dismiss();
-                    });
-                });
-                continue;
+                if (blob.getSize() > 0)
+                    if (auto* proc = target->getPlugin (slotIdx))
+                        proc->setStateInformation (blob.getData(), (int) blob.getSize());
+                target->setPluginBypassed   (slotIdx, bypassed);
+                target->setPluginAppearance (slotIdx, tint, nick);
             }
-
-            juce::PluginDescription desc;
-            if (auto found = knownPluginList.getTypeForIdentifierString (slot.pluginIdentifier))
-                desc = *found;
-            else
-            {
-                desc.pluginFormatName = "VST3";
-                desc.fileOrIdentifier = slot.pluginIdentifier;
-                desc.name             = slot.pluginName;
-            }
-
-            juce::MemoryBlock stateBlob = slot.stateData;
-            bool bypassed   = slot.isBypassed;
-            juce::Colour slotTint = slot.tint;
-            juce::String slotNick = slot.nickname;
-            int  chanIdx    = i;
-            int  slotIdx    = slotIndex;
-
-            channels[i]->addPlugin (desc, [this, chanIdx, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
-            {
-                if (ok)
-                {
-                    if (stateBlob.getSize() > 0)
-                        if (auto* proc = channels[chanIdx]->getPlugin (slotIdx))
-                            proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
-                    channels[chanIdx]->setPluginBypassed (slotIdx, bypassed);
-                    channels[chanIdx]->setPluginAppearance (slotIdx, slotTint, slotNick);
-                }
-                juce::MessageManager::callAsync ([this, chanIdx] {
-                    channelStripPanels[chanIdx]->refresh();
-                    if (--pendingPluginLoads <= 0)
-                        loadingOverlay.dismiss();
-                });
-            });
-        }
-    }
-
-    // Load input channel plugins
-    for (int slotIndex = 0; slotIndex < data.inputChannelState.plugins.size(); ++slotIndex)
-    {
-        const auto& slot = data.inputChannelState.plugins.getReference (slotIndex);
+            if (onSlotLoaded)
+                juce::MessageManager::callAsync (onSlotLoaded);
+        };
 
         if (slot.pluginIdentifier == NamAmpProcessor::kIdentifier
             || slot.pluginIdentifier == NamIrProcessor::kIdentifier)
         {
-            juce::MemoryBlock ampBlob = slot.stateData;
-            bool ampBypassed = slot.isBypassed;
-            juce::Colour ampTint = slot.tint;
-            juce::String ampNick = slot.nickname;
-            int ampSlot = slotIndex;
+            // Role restores from the state blob; kind here only picks the class.
             const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
-
-            inputChannel->addInternalRow (rowKind, [this, ampSlot, ampBlob, ampBypassed, ampTint, ampNick] (bool ok)
-            {
-                if (ok)
-                {
-                    if (ampBlob.getSize() > 0)
-                        if (auto* proc = inputChannel->getPlugin (ampSlot))
-                            proc->setStateInformation (ampBlob.getData(), (int) ampBlob.getSize());
-                    inputChannel->setPluginBypassed (ampSlot, ampBypassed);
-                    inputChannel->setPluginAppearance (ampSlot, ampTint, ampNick);
-                }
-                juce::MessageManager::callAsync ([this] {
-                    inputChannelPanel->refresh();
-                    if (--pendingPluginLoads <= 0)
-                        loadingOverlay.dismiss();
-                });
-            });
+            strip.addInternalRow (rowKind, slotIdx, applyAndNotify);
             continue;
         }
 
@@ -3326,29 +3526,31 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
             desc.fileOrIdentifier = slot.pluginIdentifier;
             desc.name             = slot.pluginName;
         }
-        juce::MemoryBlock stateBlob = slot.stateData;
-        bool bypassed = slot.isBypassed;
-        juce::Colour slotTint = slot.tint;
-        juce::String slotNick = slot.nickname;
-        int slotIdx = slotIndex;
 
-        inputChannel->addPlugin (desc, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
+        strip.addPlugin (desc, slotIdx, applyAndNotify);
+    }
+}
+
+void MainComponent::loadProjectPlugins (const ProjectData& data)
+{
+    // Load channel plugins
+    for (int i = 0; i < NUM_CHANNELS; ++i)
+    {
+        restoreChainInto (*channels[i], data.channels[i], [this, i]
         {
-            if (ok)
-            {
-                if (stateBlob.getSize() > 0)
-                    if (auto* proc = inputChannel->getPlugin (slotIdx))
-                        proc->setStateInformation (stateBlob.getData(), (int) stateBlob.getSize());
-                inputChannel->setPluginBypassed (slotIdx, bypassed);
-                inputChannel->setPluginAppearance (slotIdx, slotTint, slotNick);
-            }
-            juce::MessageManager::callAsync ([this] {
-                inputChannelPanel->refresh();
-                if (--pendingPluginLoads <= 0)
-                    loadingOverlay.dismiss();
-            });
+            channelStripPanels[i]->refresh();
+            if (--pendingPluginLoads <= 0)
+                loadingOverlay.dismiss();
         });
     }
+
+    // Load input channel plugins
+    restoreChainInto (*inputChannel, data.inputChannelState, [this]
+    {
+        inputChannelPanel->refresh();
+        if (--pendingPluginLoads <= 0)
+            loadingOverlay.dismiss();
+    });
 
     // Load master FX bus plugins
     for (int slotIndex = 0; slotIndex < data.fxBusState.plugins.size(); ++slotIndex)
@@ -3367,9 +3569,9 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         bool bypassed               = slot.isBypassed;
         juce::Colour slotTint       = slot.tint;
         juce::String slotNick       = slot.nickname;
-        int  slotIdx                = slotIndex;
+        int  slotIdx                = slot.slotIndex >= 0 ? slot.slotIndex : slotIndex;
 
-        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
+        fxBus->addPlugin (desc, slotIdx, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
         {
             if (ok)
             {
@@ -3888,7 +4090,15 @@ void MainComponent::scanForPlugins (bool clearCache)
     scanner->launchThread();
 }
 
-void MainComponent::showAddPluginMenu (int chanIdx)
+void MainComponent::warnRackFull()
+{
+    juce::AlertWindow::showMessageBoxAsync (
+        juce::AlertWindow::WarningIcon, "Rack Full",
+        "That slot is taken and there is no free slot left on this strip.\n\n"
+        "Remove a plugin to make room.", "OK");
+}
+
+void MainComponent::showAddPluginMenu (int chanIdx, int slot)
 {
     if (knownPluginList.getTypes().isEmpty())
     {
@@ -3899,11 +4109,11 @@ void MainComponent::showAddPluginMenu (int chanIdx)
     }
 
     auto* browser = new PluginBrowserWindow (knownPluginList);
-    browser->onPluginSelected = [this, chanIdx] (const juce::PluginDescription& desc)
+    browser->onPluginSelected = [this, chanIdx, slot] (const juce::PluginDescription& desc)
     {
         if (chanIdx == -1)
         {
-            inputChannel->addPlugin (desc, [this] (bool ok) {
+            inputChannel->addPlugin (desc, slot, [this] (bool ok) {
                 if (! ok)
                     juce::AlertWindow::showMessageBoxAsync (
                         juce::AlertWindow::WarningIcon, "UpStage", "Failed to load plugin.", "OK");
@@ -3915,7 +4125,7 @@ void MainComponent::showAddPluginMenu (int chanIdx)
         }
         else
         {
-            channels[chanIdx]->addPlugin (desc, [this, chanIdx] (bool ok) {
+            channels[chanIdx]->addPlugin (desc, slot, [this, chanIdx] (bool ok) {
                 if (! ok)
                     juce::AlertWindow::showMessageBoxAsync (
                         juce::AlertWindow::WarningIcon, "UpStage", "Failed to load plugin.", "OK");
@@ -3937,7 +4147,7 @@ void MainComponent::showAddPluginMenu (int chanIdx)
     opts.launchAsync();
 }
 
-void MainComponent::showAddPluginMenuForFxBus()
+void MainComponent::showAddPluginMenuForFxBus (int slot)
 {
     if (knownPluginList.getTypes().isEmpty())
     {
@@ -3948,9 +4158,9 @@ void MainComponent::showAddPluginMenuForFxBus()
     }
 
     auto* browser = new PluginBrowserWindow (knownPluginList);
-    browser->onPluginSelected = [this] (const juce::PluginDescription& desc)
+    browser->onPluginSelected = [this, slot] (const juce::PluginDescription& desc)
     {
-        fxBus->addPlugin (desc, [this] (bool ok) {
+        fxBus->addPlugin (desc, slot, [this] (bool ok) {
             if (! ok)
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::AlertWindow::WarningIcon, "UpStage", "Failed to load FX plugin.", "OK");

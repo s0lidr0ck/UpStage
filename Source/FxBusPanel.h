@@ -12,9 +12,10 @@ class FxBusPanel : public juce::Component,
                    public juce::Slider::Listener
 {
 public:
-    std::function<void()> onAddPluginClicked;
+    /** Requests a plugin for `slot` (-1 = first free, from the Add Insert button). */
+    std::function<void(int slot)> onAddPluginClicked;
     std::function<void(float /*dB*/)> onMasterFaderChanged;
-    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed)> onPastePlugin;
+    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed, int slot)> onPastePlugin;
 
     juce::Array<PluginAppearanceState> getAppearances() const;
     void setAppearances (const juce::Array<PluginAppearanceState>& appearances);
@@ -34,7 +35,10 @@ public:
 
     void paint   (juce::Graphics& g) override;
     void resized () override;
-    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDown        (const juce::MouseEvent& e) override;
+    void mouseDrag        (const juce::MouseEvent& e) override;
+    void mouseUp          (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     void sliderValueChanged (juce::Slider* s) override;
 
@@ -78,6 +82,13 @@ private:
     void rebuildSlots();
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
+    void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
+
+    // Drag-to-swap, matching ChannelStripPanel.
+    int  dragSourceSlot = -1;
+    int  dragTargetSlot = -1;
+    bool dragging = false;
+    bool doubleClicked = false;
     void showNicknameDialog (int slotIndex);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxBusPanel)

@@ -39,3 +39,6 @@ Desktop.ini
 *.cache
 pluginList.xml
 pluginBlacklist.xml
+
+# WER crash dumps (full dumps, ~100MB each)
+CrashDumps/

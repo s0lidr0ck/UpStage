@@ -3984,7 +3984,7 @@
     <ClInclude Include="..\..\Source\ImageLoader.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\NamMidiHooks.h">
+    <ClInclude Include="..\..\Source\MidiLearnHooks.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\AmpLibraryBrowserWindow.h">

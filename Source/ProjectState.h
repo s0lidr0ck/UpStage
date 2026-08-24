@@ -18,6 +18,12 @@ struct PluginSlotState
 {
     juce::String pluginIdentifier;   // VST3 plugin identifier string
     juce::String pluginName;
+
+    // Which rack slot this plugin sat in. Slots are fixed positions and a chain
+    // can have gaps, so position in this array is NOT the slot number.
+    // -1 means "not recorded" - a project saved before fixed slots, which loads
+    // packed from the top exactly as it used to.
+    int          slotIndex = -1;
     juce::MemoryBlock stateData;     // raw bytes from getStateInformation()
     bool         isBypassed = false;
     // Per-slot appearance. Lives on the slot (not keyed by plugin name) so two
