@@ -292,18 +292,61 @@ void FxBus::setState (const State& s)
     bypassed.store (s.bypassed);
 
     juce::ScopedLock sl (chainLock);
-    int numToRestore = juce::jmin (pluginChain.size(), s.plugins.size());
-    for (int i = 0; i < numToRestore; ++i)
+
+    // Restore by plugin IDENTITY, not by chain position. A saved state blob only
+    // means anything to the plugin it came from - handing it to a different
+    // plugin is undefined behaviour and crashes some VST3s outright. Chains
+    // drift all the time (a pedal added, the chain reordered, a whole channel
+    // pasted over) while scenes keep the chain they were captured with, so
+    // position alone cannot be trusted.
+    juce::Array<bool> claimed;
+    claimed.insertMultiple (0, false, pluginChain.size());
+
+    // Prefer the same index - the overwhelmingly common case, and it keeps two
+    // instances of the same plugin in their own slots - then fall back to any
+    // unclaimed slot holding that plugin, so a reordered chain still restores.
+    auto findMatch = [&] (const juce::String& id, int preferredIndex) -> int
+    {
+        if (juce::isPositiveAndBelow (preferredIndex, pluginChain.size())
+            && ! claimed[preferredIndex]
+            && pluginChain[preferredIndex]->identifier == id)
+            return preferredIndex;
+
+        for (int i = 0; i < pluginChain.size(); ++i)
+            if (! claimed[i] && pluginChain[i]->identifier == id)
+                return i;
+
+        return -1;
+    };
+
+    int skipped = 0;
+
+    for (int i = 0; i < s.plugins.size(); ++i)
     {
         const auto& slot = s.plugins.getReference (i);
-        pluginChain[i]->bypassed = slot.isBypassed;
-        pluginChain[i]->tint     = slot.tint;
-        pluginChain[i]->nickname = slot.nickname;
 
-        if (pluginChain[i]->processor != nullptr && slot.stateData.getSize() > 0)
-            pluginChain[i]->processor->setStateInformation (
+        const int target = findMatch (slot.pluginIdentifier, i);
+        if (target < 0)
+        {
+            // That plugin is no longer in this chain. Leave whatever is here
+            // alone rather than corrupting it with a stranger's state.
+            ++skipped;
+            continue;
+        }
+
+        claimed.set (target, true);
+        pluginChain[target]->bypassed = slot.isBypassed;
+        pluginChain[target]->tint     = slot.tint;
+        pluginChain[target]->nickname = slot.nickname;
+
+        if (pluginChain[target]->processor != nullptr && slot.stateData.getSize() > 0)
+            pluginChain[target]->processor->setStateInformation (
                 slot.stateData.getData(), (int) slot.stateData.getSize());
     }
+
+    if (skipped > 0)
+        DBG ("FxBus::setState: skipped " + juce::String (skipped)
+             + " saved slot(s) whose plugin is no longer in the chain");
 }
 
 void FxBus::setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname)
