@@ -238,6 +238,31 @@ void FxBusPanel::paint (juce::Graphics& g)
         };
         groove (slotStartY - 3);
         groove (slotStartY + FxBus::MAX_FX_SLOTS * (kSlotHeight + kSlotPadding) + 1);
+
+    // ---- Drag feedback, matching ChannelStripPanel ----
+    if (dragging && dragTargetSlot >= 0 && dragSourceSlot >= 0 && dragTargetSlot != dragSourceSlot)
+    {
+        int indicatorY = slotStartY + dragTargetSlot * (kSlotHeight + kSlotPadding);
+        if (dragTargetSlot > dragSourceSlot)
+            indicatorY += kSlotHeight;
+
+        g.setColour (juce::Colour (0xff4a90e2));
+        g.fillRect (6, indicatorY - 1, getWidth() - 12, 3);
+
+        juce::Path arrow;
+        arrow.addTriangle (4.0f, (float) indicatorY - 4.0f,
+                           4.0f, (float) indicatorY + 4.0f,
+                           10.0f, (float) indicatorY);
+        g.fillPath (arrow);
+    }
+
+    if (dragging && dragSourceSlot >= 0)
+    {
+        int sy = slotStartY + dragSourceSlot * (kSlotHeight + kSlotPadding);
+        auto sourceRect = juce::Rectangle<int> (6, sy, getWidth() - 12, kSlotHeight);
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.fillRoundedRectangle (sourceRect.toFloat(), 3.0f);
+    }
     }
 
     // ---- Master VOLUME knob: its own bolted sub-plate with corner screws ----
@@ -364,26 +389,80 @@ int FxBusPanel::getSlotAt (int y) const
 
 void FxBusPanel::mouseDown (const juce::MouseEvent& e)
 {
+    doubleClicked = false;
+
     int slotIndex = getSlotAt (e.y);
     if (slotIndex < 0) return;
 
-    if (slots[slotIndex].empty)
-    {
-        if (e.mods.isLeftButtonDown())
-        {
-            if (onAddPluginClicked) onAddPluginClicked (slotIndex);
-        }
-    }
-    else if (e.mods.isLeftButtonDown() && ! e.mods.isRightButtonDown())
-    {
-        bool bp = bus.isPluginBypassed (slotIndex);
-        bus.setPluginBypassed (slotIndex, ! bp);
-        refresh();
-    }
-    else if (e.mods.isRightButtonDown())
+    if (e.mods.isRightButtonDown())
     {
         showSlotContextMenu (slotIndex);
+        return;
     }
+
+    if (slots[slotIndex].empty)
+    {
+        if (onAddPluginClicked) onAddPluginClicked (slotIndex);
+    }
+    else
+    {
+        // Bypass now fires on mouse-UP if the click didn't turn into a drag,
+        // so a drag can start from an occupied slot. Same as the channel strips.
+        dragSourceSlot = slotIndex;
+        dragging = false;
+    }
+}
+
+void FxBusPanel::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    int slotIndex = getSlotAt (e.y);
+    if (slotIndex < 0 || slots[slotIndex].empty) return;
+
+    doubleClicked = true;
+    bus.openPluginEditor (slotIndex);
+}
+
+void FxBusPanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragSourceSlot < 0 || slots[dragSourceSlot].empty) return;
+
+    if (! dragging && e.getDistanceFromDragStart() > 5)
+        dragging = true;
+
+    if (dragging)
+    {
+        int target = getSlotAt (e.y);
+        if (target != dragTargetSlot)
+        {
+            dragTargetSlot = target;
+            repaint();
+        }
+    }
+}
+
+void FxBusPanel::mouseUp (const juce::MouseEvent&)
+{
+    if (dragging && dragSourceSlot >= 0 && dragTargetSlot >= 0
+        && dragSourceSlot != dragTargetSlot
+        && ! bus.isSlotEmpty (dragSourceSlot))
+    {
+        // Swap the two slots. Dropping onto an empty slot moves there; onto an
+        // occupied one, the two trade places. Nothing else in the rack moves.
+        bus.swapSlots (dragSourceSlot, dragTargetSlot);
+        refresh();
+    }
+    else if (! dragging && ! doubleClicked && dragSourceSlot >= 0
+             && ! slots[dragSourceSlot].empty)
+    {
+        bool bp = bus.isPluginBypassed (dragSourceSlot);
+        bus.setPluginBypassed (dragSourceSlot, ! bp);
+        refresh();
+    }
+
+    dragSourceSlot = -1;
+    dragTargetSlot = -1;
+    dragging = false;
+    repaint();
 }
 
 void FxBusPanel::showSlotContextMenu (int slotIndex)
@@ -410,6 +489,9 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
             menu.addItem (11, samePlugin ? "Paste Settings" : "Paste (Replace)");
         }
         menu.addSeparator();
+        menu.addItem (4, "Move Up",   slotIndex > 0);
+        menu.addItem (5, "Move Down", slotIndex < bus.getNumSlots() - 1);
+        menu.addSeparator();
         menu.addItem (3, "Remove");
         addSlotMidiItems (menu, slotIndex);
     }
@@ -434,6 +516,15 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
             }
             case 3:
                 bus.removePlugin (slotIndex);
+                refresh();
+                break;
+
+            case 4:
+                bus.swapSlots (slotIndex, slotIndex - 1);
+                refresh();
+                break;
+            case 5:
+                bus.swapSlots (slotIndex, slotIndex + 1);
                 refresh();
                 break;
             case 6:

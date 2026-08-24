@@ -35,7 +35,10 @@ public:
 
     void paint   (juce::Graphics& g) override;
     void resized () override;
-    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDown        (const juce::MouseEvent& e) override;
+    void mouseDrag        (const juce::MouseEvent& e) override;
+    void mouseUp          (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     void sliderValueChanged (juce::Slider* s) override;
 
@@ -80,6 +83,12 @@ private:
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
     void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
+
+    // Drag-to-swap, matching ChannelStripPanel.
+    int  dragSourceSlot = -1;
+    int  dragTargetSlot = -1;
+    bool dragging = false;
+    bool doubleClicked = false;
     void showNicknameDialog (int slotIndex);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxBusPanel)
