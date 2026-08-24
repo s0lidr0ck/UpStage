@@ -7,7 +7,7 @@
  *
  * Signal flow:
  *
- *   Channel sum ──► [Insert 1] ──► [Insert 2] ──► [Insert 3] ──► [Insert 4] ──► Master Fader ──► Output
+ *   Channel sum ──► [Insert 1] ──► ... ──► [Insert 8] ──► Master Fader ──► Output
  *
  * A fixed rack of MAX_FX_SLOTS slots, each holding a plugin or empty. Occupied
  * slots process the stereo master mix in series, in slot order. Removing the
@@ -17,7 +17,7 @@
 class FxBus
 {
 public:
-    static constexpr int MAX_FX_SLOTS = 4;
+    static constexpr int MAX_FX_SLOTS = 8;
 
     explicit FxBus (juce::AudioPluginFormatManager& fm);
     ~FxBus();
