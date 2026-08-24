@@ -1,6 +1,7 @@
 #include "ChannelStrip.h"
 #include "NamAmpProcessor.h"
 #include "NamIrProcessor.h"
+#include "PluginModuleKeeper.h"
 
 ChannelStrip::ChannelStrip (int index, juce::AudioPluginFormatManager& fm)
     : channelIndex (index), formatManager (fm)
@@ -36,6 +37,12 @@ void ChannelStrip::disposeEntry (PluginEntry* entry)
     // only delete it here if it is still open.
     if (entry->editorWindow != nullptr)
         delete entry->editorWindow.getComponent();
+
+    // Park the plugin instead of destroying it, so its DLL stays mapped and a
+    // thread the plugin left running can't fault into unmapped memory.
+    // See PluginModuleKeeper.h - it destroys the instance itself when this
+    // module is already covered.
+    PluginModuleKeeper::keep (entry->identifier, std::move (entry->processor));
 
     delete entry;
 }

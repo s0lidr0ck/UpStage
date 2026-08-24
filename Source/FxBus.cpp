@@ -1,4 +1,5 @@
 #include "FxBus.h"
+#include "PluginModuleKeeper.h"
 
 //==============================================================================
 FxBus::FxBus (juce::AudioPluginFormatManager& fm)
@@ -30,6 +31,12 @@ void FxBus::disposeEntry (PluginEntry* entry)
     // delete it here if it is still open.
     if (entry->editorWindow != nullptr)
         delete entry->editorWindow.getComponent();
+
+    // Park the plugin instead of destroying it, so its DLL stays mapped and a
+    // thread the plugin left running can't fault into unmapped memory.
+    // See PluginModuleKeeper.h - it destroys the instance itself when this
+    // module is already covered.
+    PluginModuleKeeper::keep (entry->identifier, std::move (entry->processor));
 
     delete entry;
 }
