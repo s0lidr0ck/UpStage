@@ -189,8 +189,31 @@ private:
     // Routing mode: parallel (all channels) vs single (active only)
     bool   parallelRouting = true;
 
-    // Per-channel crossfade gain for smooth switching in single mode
+    // Per-channel fade-IN gain, used when a suspended channel wakes up (its
+    // plugins were frozen, so ramp rather than click). Switching AWAY no longer
+    // ramps down - the tail below handles that.
     juce::SmoothedValue<float> channelFadeGain[NUM_CHANNELS];
+
+    //==========================================================================
+    // Inactive-channel tails (SINGLE routing mode only).
+    //
+    // Previously an inactive channel was fed silence and processed forever
+    // while NOT being mixed - so it cost full CPU and you never heard its
+    // reverb or delay ring out. Now it stays mixed and is fed silence, so its
+    // tail decays naturally; after kChannelTailSeconds it fades out over
+    // kChannelTailFadeSeconds and stops processing entirely, costing nothing.
+    //
+    // Audio thread only.
+
+    /** How long an inactive channel keeps ringing before it is suspended. */
+    static constexpr double kChannelTailSeconds     = 3.0;
+    /** Fade applied at the very end of the tail so the cutoff can't click. */
+    static constexpr double kChannelTailFadeSeconds = 0.1;
+
+    /** Samples elapsed since this channel went inactive. */
+    int  channelTailSamples[NUM_CHANNELS] = {};
+    /** True once the tail has expired and the channel stopped processing. */
+    bool channelSuspended[NUM_CHANNELS]   = {};
 
     // Numpad 9 prefix: press Numpad 9, then Numpad 1-4 to switch channel
     bool   numpad9Prefix = false;
@@ -401,6 +424,21 @@ private:
     juce::Label statusLabel;
     juce::Label statusStateLabel;  // colored state flags
     juce::Label cpuLabel;
+
+    //==========================================================================
+    // Audio performance instrumentation.
+    //
+    // The average CPU figure hides the spikes that actually cause dropouts, and
+    // nothing reported whether the driver was dropping buffers at all. XRun
+    // count comes from the device itself, so it is the ground truth for "did we
+    // actually underrun" rather than an inference from CPU load.
+
+    /** Highest CPU reading seen in the current display window. */
+    double peakCpuUsage = 0.0;
+    /** Device XRun count when we started watching, so we can show a delta. */
+    int    baselineXRuns = -1;
+    /** Last delta shown, so the label only changes when it needs to. */
+    int    xrunsSinceStart = 0;
     juce::Label ramLabel;
 
     //==========================================================================

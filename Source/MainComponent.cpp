@@ -1141,17 +1141,51 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         {
             channelOutputs[i].setSize (2, info.numSamples, false, false, true);
 
-            bool isActive = parallelRouting || (i == activeChannel);
-            bool isFading = ! parallelRouting && channelFadeGain[i].isSmoothing();
-            bool shouldProcess = isActive || isFading;
+            const bool isActive = parallelRouting || (i == activeChannel);
 
-            if (shouldProcess)
+            // ---- Inactive-channel tail bookkeeping (single mode only) ----
+            const int tailTotal = (int) (currentSampleRate * kChannelTailSeconds);
+            const int fadeLen   = (int) (currentSampleRate * kChannelTailFadeSeconds);
+
+            if (isActive)
+            {
+                // Waking a suspended channel: its plugins have been frozen, so
+                // ramp in rather than snapping to whatever they held.
+                if (channelSuspended[i])
+                {
+                    channelFadeGain[i].setCurrentAndTargetValue (0.0f);
+                    channelFadeGain[i].setTargetValue (1.0f);
+                    channelSuspended[i] = false;
+                }
+                channelTailSamples[i] = 0;
+            }
+            else if (! parallelRouting)
+            {
+                if (channelTailSamples[i] < tailTotal)
+                    channelTailSamples[i] += info.numSamples;
+                else
+                    channelSuspended[i] = true;
+            }
+            else
+            {
+                // Parallel mode is unchanged: every channel always processes.
+                channelTailSamples[i] = 0;
+                channelSuspended[i]   = false;
+            }
+
+            const bool tailing = ! isActive && ! parallelRouting && ! channelSuspended[i];
+            const bool shouldProcess = isActive || tailing;
+
+            if (isActive)
             {
                 for (int ch = 0; ch < 2; ++ch)
                     channelOutputs[i].copyFrom (ch, 0, work, ch, 0, info.numSamples);
             }
             else
             {
+                // Tailing channels are fed SILENCE, not the live input - their
+                // own reverb/delay decay is the tail. Suspended ones are simply
+                // left cleared and never processed.
                 channelOutputs[i].clear();
             }
 
@@ -1167,24 +1201,30 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
                 rtChannelMidi.addEvents (midi, 0, -1, 0);
 
                 if (shouldProcess)
-                {
                     channels[i]->processBlock (channelOutputs[i], rtChannelMidi);
-                }
-                else
-                {
-                    // Drive inactive channels with silence so their plugins keep
-                    // their internal state running (reusing the member buffer).
-                    silentBuffer.clear();
-                    channels[i]->processBlock (silentBuffer, rtChannelMidi);
-                }
+                // else: suspended - no processing at all. This is the CPU saving.
             }
 
-            // Apply crossfade in single mode
-            if (! parallelRouting && shouldProcess)
+            // Fade-in for a channel that just woke from suspension.
+            if (! parallelRouting && shouldProcess && channelFadeGain[i].isSmoothing())
             {
                 for (int s = 0; s < info.numSamples; ++s)
                 {
                     float g = channelFadeGain[i].getNextValue();
+                    for (int ch = 0; ch < 2; ++ch)
+                        channelOutputs[i].getWritePointer (ch)[s] *= g;
+                }
+            }
+
+            // Fade the last kChannelTailFadeSeconds of the tail so the moment
+            // we stop processing can't click.
+            if (tailing && fadeLen > 0 && channelTailSamples[i] > tailTotal - fadeLen)
+            {
+                const int into = channelTailSamples[i] - (tailTotal - fadeLen);
+                for (int s = 0; s < info.numSamples; ++s)
+                {
+                    const int pos = into - info.numSamples + s;
+                    const float g = 1.0f - juce::jlimit (0.0f, 1.0f, (float) pos / (float) fadeLen);
                     for (int ch = 0; ch < 2; ++ch)
                         channelOutputs[i].getWritePointer (ch)[s] *= g;
                 }
@@ -2351,7 +2391,7 @@ void MainComponent::resized()
     // Footer status bar
     auto statusArea = area.removeFromBottom (22);
     ramLabel.setBounds (statusArea.removeFromRight (90).reduced (4, 2));
-    cpuLabel.setBounds (statusArea.removeFromRight (90).reduced (4, 2));
+    cpuLabel.setBounds (statusArea.removeFromRight (230).reduced (4, 2));  // CPU + peak + xruns
     statusStateLabel.setBounds (statusArea.removeFromRight (200).reduced (4, 2));
     statusLabel.setBounds (statusArea.reduced (8, 2));
 
@@ -2916,14 +2956,44 @@ void MainComponent::timerCallback()
 
     // CPU and RAM monitoring (update every ~0.5s)
     static int perfCounter = 0;
+    // Sample CPU every tick so the peak reflects spikes between displays.
+    peakCpuUsage = juce::jmax (peakCpuUsage, deviceManager.getCpuUsage() * 100.0);
+
     if (++perfCounter >= 15)
     {
         perfCounter = 0;
         double cpuUsage = deviceManager.getCpuUsage() * 100.0;
-        cpuLabel.setText ("CPU: " + juce::String (cpuUsage, 1) + "%", juce::dontSendNotification);
+
+        // The average hides the spikes that actually cause dropouts, so show
+        // the peak seen since the last update alongside it, then reset.
+        const double shownPeak = juce::jmax (peakCpuUsage, cpuUsage);
+        peakCpuUsage = 0.0;
+
+        // XRun count is the driver's own tally of dropped buffers - ground
+        // truth, rather than inferring underruns from CPU load. -1 means the
+        // driver doesn't report it.
+        // Always show something: "no XRUN field" would be indistinguishable
+        // from "zero XRuns", and that distinction is the whole point here.
+        juce::String xrunText = "  XRUN: n/a";
+        if (auto* dev = deviceManager.getCurrentAudioDevice())
+        {
+            const int x = dev->getXRunCount();
+            if (x >= 0)
+            {
+                if (baselineXRuns < 0 || x < baselineXRuns)
+                    baselineXRuns = x;              // first read, or device restarted
+                xrunsSinceStart = x - baselineXRuns;
+                xrunText = "  XRUN: " + juce::String (xrunsSinceStart);
+            }
+        }
+
+        cpuLabel.setText ("CPU: " + juce::String (cpuUsage, 1) + "%"
+                          + "  PK: " + juce::String (shownPeak, 1) + "%"
+                          + xrunText,
+                          juce::dontSendNotification);
         cpuLabel.setColour (juce::Label::textColourId,
-            cpuUsage > 80.0 ? juce::Colour (0xffcc4444)
-            : cpuUsage > 50.0 ? juce::Colour (0xffccaa44)
+            (xrunsSinceStart > 0 || shownPeak > 80.0) ? juce::Colour (0xffcc4444)
+            : shownPeak > 50.0 ? juce::Colour (0xffccaa44)
             : juce::Colour (0xff88aa88));
 
         PROCESS_MEMORY_COUNTERS pmc;
@@ -3900,7 +3970,10 @@ void MainComponent::setActiveChannel (int idx)
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
         channels[i]->setActive (i == idx);
-        channelFadeGain[i].setTargetValue (i == idx ? 1.0f : 0.0f);
+        // Deliberately NOT ramping the outgoing channel down: a 10ms fade to
+        // zero cut its reverb and delay dead. It stays at unity and rings out;
+        // the audio thread fades it at the end of the tail window instead.
+        channelFadeGain[i].setTargetValue (1.0f);
     }
     updateActiveIndicators();
     updateStatusBar();
