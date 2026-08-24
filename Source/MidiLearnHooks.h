@@ -25,9 +25,12 @@ struct MidiLearnHooks
     static inline std::function<void (const juce::String& paramID)> clearBinding;
     static inline std::function<int (const juce::String& paramID)> getCc;   // -1 = unbound
 
-    /** Switch mode for a bound on/off target. Momentary = sends 127 on press
-        and 0 on release; latching (the default) = one message per press,
-        alternating value. Cannot be auto-detected - the streams are identical. */
-    static inline std::function<bool (const juce::String& paramID)> isMomentary;
-    static inline std::function<void (const juce::String& paramID, bool momentary)> setMomentary;
+    /** Switch type for a bound on/off target, as an int matching
+        MidiLearnManager::Binding::SwitchType:
+          0 = Latching     - one message per press, alternating 0 / 127
+          1 = Momentary    - 127 held, 0 on release
+          2 = SingleValue  - the same value every press
+        Cannot be auto-detected between 0 and 1 - those streams are identical. */
+    static inline std::function<int (const juce::String& paramID)> getSwitchType;
+    static inline std::function<void (const juce::String& paramID, int type)> setSwitchType;
 };

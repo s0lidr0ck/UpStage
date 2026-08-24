@@ -68,13 +68,14 @@ MainComponent::MainComponent() : menuBar (this)
     {
         return midiLearnManager.getCcForParam (pid);
     };
-    MidiLearnHooks::isMomentary = [this] (const juce::String& pid)
+    MidiLearnHooks::getSwitchType = [this] (const juce::String& pid)
     {
-        return midiLearnManager.isMomentarySwitch (pid);
+        return (int) midiLearnManager.getSwitchType (pid);
     };
-    MidiLearnHooks::setMomentary = [this] (const juce::String& pid, bool momentary)
+    MidiLearnHooks::setSwitchType = [this] (const juce::String& pid, int type)
     {
-        midiLearnManager.setMomentarySwitch (pid, momentary);
+        midiLearnManager.setSwitchType (
+            pid, (MidiLearnManager::Binding::SwitchType) type);
         projectDirty = true;
     };
     midiLearnManager.registerParameter ("loopVolume",  0.0f,  1.0f);
@@ -1863,10 +1864,11 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
             // it can't be told from the CC stream.
             if (cc >= 0 && pid == "tapTempo")
             {
-                const bool momentary = midiLearnManager.isMomentarySwitch (pid);
+                const int type = (int) midiLearnManager.getSwitchType (pid);
                 juce::PopupMenu modeMenu;
-                modeMenu.addItem (3, "Latching (one message per press)", true, ! momentary);
-                modeMenu.addItem (4, "Momentary (127 held, 0 on release)", true, momentary);
+                modeMenu.addItem (3, "Latching (alternates 0 / 127)",      true, type == 0);
+                modeMenu.addItem (4, "Momentary (127 held, 0 released)",   true, type == 1);
+                modeMenu.addItem (5, "Single value (same value each press)", true, type == 2);
                 m.addSubMenu ("MIDI Switch Type", modeMenu);
             }
 
@@ -1874,9 +1876,10 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
             {
                 if (r == 1) { midiLearnManager.beginLearning (pid); repaint(); }
                 else if (r == 2) { midiLearnManager.clearBinding (pid); repaint(); }
-                else if (r == 3 || r == 4)
+                else if (r >= 3 && r <= 5)
                 {
-                    midiLearnManager.setMomentarySwitch (pid, r == 4);
+                    midiLearnManager.setSwitchType (
+                        pid, (MidiLearnManager::Binding::SwitchType) (r - 3));
                     projectDirty = true;
                 }
             });
@@ -2919,10 +2922,11 @@ bool MainComponent::isSwitchPress (const juce::String& paramID, float value)
     const bool risingEdge = isRisingEdge (paramID, value);
 
     // A momentary switch sends 127 on press and 0 on release, so only the
-    // rising edge is a press. A latching switch sends one message per press
-    // (alternating 0 / 127), so EVERY message is a press - filtering for a
-    // rising edge there would swallow every other press.
-    return midiLearnManager.isMomentarySwitch (paramID) ? risingEdge : true;
+    // rising edge is a press. Latching and single-value switches send one
+    // message per press, so EVERY message is a press - filtering for a rising
+    // edge there would swallow every other press.
+    using ST = MidiLearnManager::Binding::SwitchType;
+    return midiLearnManager.getSwitchType (paramID) == ST::Momentary ? risingEdge : true;
 }
 
 bool MainComponent::resolveSlot (const juce::String& stripId, int slotIndex,
@@ -3009,17 +3013,28 @@ void MainComponent::midiLearnParameterChanged (const juce::String& paramID, floa
 
         const bool risingEdge = isRisingEdge (paramID, value);
 
-        if (midiLearnManager.isMomentarySwitch (paramID))
+        using ST = MidiLearnManager::Binding::SwitchType;
+        switch (midiLearnManager.getSwitchType (paramID))
         {
-            // The switch has no state of its own - we keep it, and flip on press.
-            if (risingEdge)
+            case ST::Momentary:
+                // No state of its own, and it reports the release too, so only
+                // the press counts. We hold the state and flip on each press.
+                if (risingEdge)
+                    setSlotBypassed (strip, slot, ! isSlotBypassed (strip, slot));
+                break;
+
+            case ST::SingleValue:
+                // Sends the same value every press, so the value says nothing.
+                // Every message is one press: flip on each.
                 setSlotBypassed (strip, slot, ! isSlotBypassed (strip, slot));
-        }
-        else
-        {
-            // The switch holds its own state, so mirror it: 127 = effect on.
-            // Self-syncing - the switch's LED and the slot can't drift apart.
-            setSlotBypassed (strip, slot, value < 0.5f);
+                break;
+
+            case ST::Latching:
+            default:
+                // The switch holds its own state, so mirror it: 127 = effect on.
+                // Self-syncing - the switch's LED and the slot can't drift apart.
+                setSlotBypassed (strip, slot, value < 0.5f);
+                break;
         }
         return;
     }

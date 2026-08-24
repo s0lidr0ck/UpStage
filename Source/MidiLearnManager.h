@@ -56,15 +56,27 @@ public:
         //----------------------------------------------------------------------
         // Switch behaviour (only meaningful for on/off targets)
 
-        /** How the bound physical switch reports a press.
-            A momentary switch sends 127 on press and 0 on release - two
-            messages per press. A latching switch sends ONE message per press,
-            alternating 0 / 127, and tracks its own state.
-            The two message streams are identical, so this cannot be detected
-            automatically - it has to be told.
-            Default false (latching), matching most amp-modeller footcontrollers
-            and the follow-the-value convention the other switch params use. */
-        bool momentarySwitch = false;
+        /** How the bound physical switch reports a press. Momentary and
+            Latching send identical message streams (127,0,127,0) and differ
+            only in timing, so this cannot be detected automatically. */
+        enum class SwitchType
+        {
+            /** One message per press, alternating 0 / 127. The switch tracks
+                its own state, so the target mirrors the value: 127 = on. */
+            Latching = 0,
+            /** 127 on press, 0 on release - two messages per press. The switch
+                has no state, so the target flips on the rising edge. */
+            Momentary = 1,
+            /** The same value every press, whatever that value is. Neither of
+                the above works: following the value sticks the target in one
+                state forever, and there is no rising edge to catch. Every
+                message is one press, so the target flips on each. */
+            SingleValue = 2
+        };
+
+        /** Defaults to Latching, matching most amp-modeller footcontrollers and
+            the follow-the-value convention the other switch params use. */
+        SwitchType switchType = SwitchType::Latching;
 
         //----------------------------------------------------------------------
         // Soft takeover state (not serialised — re-armed on every recall)
@@ -146,10 +158,10 @@ public:
     /** CC number bound to paramID, or -1 if not bound. Thread-safe. */
     int getCcForParam (const juce::String& paramID) const;
 
-    /** Switch behaviour for a bound on/off target. See Binding::momentarySwitch.
-        Returns false (latching) when paramID isn't bound. Thread-safe. */
-    bool isMomentarySwitch (const juce::String& paramID) const;
-    void setMomentarySwitch (const juce::String& paramID, bool momentary);
+    /** Switch behaviour for a bound on/off target. See Binding::SwitchType.
+        Returns Latching when paramID isn't bound. Thread-safe. */
+    Binding::SwitchType getSwitchType (const juce::String& paramID) const;
+    void setSwitchType (const juce::String& paramID, Binding::SwitchType type);
     /** MIDI channel bound to paramID (0 = any), or -1 if not bound. Thread-safe. */
     int getChannelForParam (const juce::String& paramID) const;
 

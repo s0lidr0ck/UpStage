@@ -543,10 +543,10 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                         ChannelStripPanel::slotBypassParamId ("fx", slotIndex));
                 break;
 
-            case 32: case 33:
-                if (MidiLearnHooks::setMomentary)
-                    MidiLearnHooks::setMomentary (
-                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex), result == 33);
+            case 32: case 33: case 34:
+                if (MidiLearnHooks::setSwitchType)
+                    MidiLearnHooks::setSwitchType (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex), result - 32);
                 break;
 
             case 10:
@@ -601,13 +601,14 @@ void FxBusPanel::addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const
 
     if (cc >= 0)
     {
-        // Which mode is right can't be detected from the CC stream - a momentary
-        // and a latching switch send identical messages. Latching is the default.
-        const bool momentary = MidiLearnHooks::isMomentary
-                            && MidiLearnHooks::isMomentary (pid);
+        // Latching and Momentary send identical CC streams, so the right one
+        // can't be detected - it has to be picked. Latching is the default.
+        const int type = MidiLearnHooks::getSwitchType
+                       ? MidiLearnHooks::getSwitchType (pid) : 0;
         juce::PopupMenu modeMenu;
-        modeMenu.addItem (32, "Latching (one message per press)", true, ! momentary);
-        modeMenu.addItem (33, "Momentary (127 held, 0 on release)", true, momentary);
+        modeMenu.addItem (32, "Latching (alternates 0 / 127)",        true, type == 0);
+        modeMenu.addItem (33, "Momentary (127 held, 0 released)",     true, type == 1);
+        modeMenu.addItem (34, "Single value (same value each press)", true, type == 2);
         menu.addSubMenu ("MIDI Switch Type", modeMenu);
     }
 }
