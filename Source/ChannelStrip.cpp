@@ -6,6 +6,9 @@ ChannelStrip::ChannelStrip (int index, juce::AudioPluginFormatManager& fm)
     : channelIndex (index), formatManager (fm)
 {
     name = "Channel " + juce::String (index + 1);
+
+    // The rack is a fixed size from here on - every slot exists, most are empty.
+    pluginChain.insertMultiple (0, nullptr, kNumSlots);
 }
 
 ChannelStrip::~ChannelStrip()
@@ -51,7 +54,7 @@ void ChannelStrip::prepare (double sampleRate, int blockSize)
     juce::ScopedLock sl (chainLock);
     for (auto* entry : pluginChain)
     {
-        if (entry->processor != nullptr)
+        if (entry != nullptr && entry->processor != nullptr)
         {
             entry->processor->setRateAndBufferSizeDetails (sampleRate, blockSize);
             entry->processor->prepareToPlay (sampleRate, blockSize);
@@ -63,19 +66,70 @@ void ChannelStrip::releaseResources()
 {
     juce::ScopedLock sl (chainLock);
     for (auto* entry : pluginChain)
-        if (entry->processor != nullptr)
+        if (entry != nullptr && entry->processor != nullptr)
             entry->processor->releaseResources();
 }
 
 //==============================================================================
+bool ChannelStrip::isSlotEmpty (int slot) const
+{
+    juce::ScopedLock sl (chainLock);
+    if (! juce::isPositiveAndBelow (slot, pluginChain.size())) return true;
+    return pluginChain[slot] == nullptr;
+}
+
+int ChannelStrip::findFirstFreeSlot() const
+{
+    juce::ScopedLock sl (chainLock);
+    for (int i = 0; i < pluginChain.size(); ++i)
+        if (pluginChain[i] == nullptr)
+            return i;
+    return -1;
+}
+
+bool ChannelStrip::placeEntry (PluginEntry* entry, int slot,
+                               const std::function<void(bool)>& callback)
+{
+    bool placed = false;
+    {
+        juce::ScopedLock sl (chainLock);
+
+        if (slot < 0)
+        {
+            for (int i = 0; i < pluginChain.size(); ++i)
+                if (pluginChain[i] == nullptr) { slot = i; break; }
+        }
+
+        if (juce::isPositiveAndBelow (slot, pluginChain.size())
+            && pluginChain[slot] == nullptr)
+        {
+            pluginChain.set (slot, entry);
+            placed = true;
+        }
+    }
+
+    if (! placed)
+    {
+        // No room, or the caller asked for a slot that is already taken. Better
+        // to refuse than to hold a plugin the rack cannot show.
+        juce::Logger::writeToLog ("ChannelStrip: no free slot for plugin");
+        disposeEntry (entry);
+    }
+
+    if (callback) callback (placed);
+    return placed;
+}
+
+//==============================================================================
 bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
+                              int slot,
                               std::function<void(bool)> callback)
 {
     // Plugin loading is async — do it on the message thread
     formatManager.createPluginInstanceAsync (
         desc, currentSampleRate, currentBlockSize,
-        [this, callback, desc] (std::unique_ptr<juce::AudioPluginInstance> instance,
-                                const juce::String& errorMessage)
+        [this, callback, desc, slot] (std::unique_ptr<juce::AudioPluginInstance> instance,
+                                      const juce::String& errorMessage)
         {
             if (instance == nullptr)
             {
@@ -103,19 +157,14 @@ bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
             entry->identifier = desc.createIdentifierString();
             entry->bypassed   = false;
 
-            {
-                juce::ScopedLock sl (chainLock);
-                pluginChain.add (entry);
-            }
-
-            if (callback) callback (true);
+            placeEntry (entry, slot, callback);
         });
     return true;
 }
 
-void ChannelStrip::addInternalRow (int kind, std::function<void(bool)> callback)
+void ChannelStrip::addInternalRow (int kind, int slot, std::function<void(bool)> callback)
 {
-    juce::MessageManager::callAsync ([this, kind, callback]
+    juce::MessageManager::callAsync ([this, kind, slot, callback]
     {
         std::unique_ptr<juce::AudioPluginInstance> proc;
         const char* identifier = nullptr;
@@ -147,22 +196,21 @@ void ChannelStrip::addInternalRow (int kind, std::function<void(bool)> callback)
         entry->identifier = identifier;
         entry->bypassed   = false;
 
-        {
-            juce::ScopedLock sl (chainLock);
-            pluginChain.add (entry);
-        }
-
-        if (callback) callback (true);
+        placeEntry (entry, slot, callback);
     });
 }
 
-void ChannelStrip::removePlugin (int chainIndex)
+void ChannelStrip::removePlugin (int slot)
 {
     PluginEntry* entry = nullptr;
     {
         juce::ScopedLock sl (chainLock);
-        if (juce::isPositiveAndBelow (chainIndex, pluginChain.size()))
-            entry = pluginChain.removeAndReturn (chainIndex);
+        if (juce::isPositiveAndBelow (slot, pluginChain.size()))
+        {
+            entry = pluginChain[slot];
+            // Empty the slot in place - neighbours keep their positions.
+            pluginChain.set (slot, nullptr);
+        }
     }
     // Dispose outside the lock: closing the editor and destroying the plugin
     // can block, and must not stall the audio thread waiting on chainLock.
@@ -175,15 +223,23 @@ void ChannelStrip::clearAllPlugins()
     {
         juce::ScopedLock sl (chainLock);
         doomed.swapWith (pluginChain);
+        // Rebuild the empty rack; the array is never left short.
+        pluginChain.insertMultiple (0, nullptr, kNumSlots);
     }
     for (auto* e : doomed)
         disposeEntry (e);
 }
 
-void ChannelStrip::movePlugin (int fromIndex, int toIndex)
+void ChannelStrip::swapSlots (int slotA, int slotB)
 {
     juce::ScopedLock sl (chainLock);
-    pluginChain.move (fromIndex, toIndex);
+    if (slotA == slotB) return;
+    if (! juce::isPositiveAndBelow (slotA, pluginChain.size())) return;
+    if (! juce::isPositiveAndBelow (slotB, pluginChain.size())) return;
+
+    auto* a = pluginChain[slotA];
+    pluginChain.set (slotA, pluginChain[slotB]);
+    pluginChain.set (slotB, a);
 }
 
 void ChannelStrip::openPluginEditor (int chainIndex)
@@ -250,39 +306,42 @@ void ChannelStrip::openPluginEditor (int chainIndex)
     entry->editorWindow = new PluginEditorWindow (proc);
 }
 
-void ChannelStrip::setPluginBypassed (int chainIndex, bool bypassed)
+void ChannelStrip::setPluginBypassed (int slot, bool bypassed)
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (chainIndex, pluginChain.size()))
-        pluginChain[chainIndex]->bypassed = bypassed;
+    if (auto* entry = pluginChain[slot])
+        entry->bypassed = bypassed;
 }
 
-bool ChannelStrip::isPluginBypassed (int chainIndex) const
+bool ChannelStrip::isPluginBypassed (int slot) const
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (chainIndex, pluginChain.size()))
-        return pluginChain[chainIndex]->bypassed;
+    if (auto* entry = pluginChain[slot])
+        return entry->bypassed;
     return false;
 }
 
 int ChannelStrip::getNumPlugins() const
 {
     juce::ScopedLock sl (chainLock);
-    return pluginChain.size();
+    int n = 0;
+    for (auto* entry : pluginChain)
+        if (entry != nullptr) ++n;
+    return n;
 }
 
-juce::AudioProcessor* ChannelStrip::getPlugin (int chainIndex) const
+juce::AudioProcessor* ChannelStrip::getPlugin (int slot) const
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (chainIndex, pluginChain.size()))
-        return pluginChain[chainIndex]->processor.get();
+    if (auto* entry = pluginChain[slot])
+        return entry->processor.get();
     return nullptr;
 }
 
-const ChannelStrip::PluginEntry& ChannelStrip::getPluginEntry (int chainIndex) const
+const ChannelStrip::PluginEntry* ChannelStrip::getPluginEntry (int slot) const
 {
     juce::ScopedLock sl (chainLock);
-    return *pluginChain[chainIndex];
+    return pluginChain[slot];
 }
 
 //==============================================================================
@@ -315,6 +374,7 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
         {
             for (auto* entry : pluginChain)
             {
+                if (entry == nullptr)            continue;   // empty slot
                 if (entry->processor == nullptr) continue;
                 if (entry->bypassed)             continue;
 
@@ -376,10 +436,10 @@ void ChannelStrip::setInputGain  (float g) { inputGainTarget.store (g); }
 void ChannelStrip::setOutputGain (float g) { outputGainTarget.store (g); }
 
 //==============================================================================
-void ChannelStrip::setPluginAppearance (int chainIndex, juce::Colour tint, const juce::String& nickname)
+void ChannelStrip::setPluginAppearance (int slot, juce::Colour tint, const juce::String& nickname)
 {
     juce::ScopedLock sl (chainLock);
-    if (auto* entry = pluginChain[chainIndex])
+    if (auto* entry = pluginChain[slot])
     {
         entry->tint = tint;
         entry->nickname = nickname;
@@ -395,9 +455,13 @@ ChannelState ChannelStrip::getState() const
     state.pan         = pan.load();
 
     juce::ScopedLock sl (chainLock);
-    for (auto* entry : pluginChain)
+    for (int i = 0; i < pluginChain.size(); ++i)
     {
+        auto* entry = pluginChain[i];
+        if (entry == nullptr) continue;   // empty slot - saved as a gap
+
         PluginSlotState slot;
+        slot.slotIndex        = i;
         slot.pluginIdentifier = entry->identifier;
         slot.pluginName       = entry->processor ? entry->processor->getName() : "";
         slot.isBypassed       = entry->bypassed;
@@ -433,15 +497,21 @@ void ChannelStrip::setState (const ChannelState& state)
     // Prefer the same index - the overwhelmingly common case, and it keeps two
     // instances of the same plugin in their own slots - then fall back to any
     // unclaimed slot holding that plugin, so a reordered chain still restores.
+    auto occupiedBy = [&] (int i, const juce::String& id)
+    {
+        return juce::isPositiveAndBelow (i, pluginChain.size())
+            && ! claimed[i]
+            && pluginChain[i] != nullptr
+            && pluginChain[i]->identifier == id;
+    };
+
     auto findMatch = [&] (const juce::String& id, int preferredIndex) -> int
     {
-        if (juce::isPositiveAndBelow (preferredIndex, pluginChain.size())
-            && ! claimed[preferredIndex]
-            && pluginChain[preferredIndex]->identifier == id)
+        if (occupiedBy (preferredIndex, id))
             return preferredIndex;
 
         for (int i = 0; i < pluginChain.size(); ++i)
-            if (! claimed[i] && pluginChain[i]->identifier == id)
+            if (occupiedBy (i, id))
                 return i;
 
         return -1;
@@ -453,7 +523,10 @@ void ChannelStrip::setState (const ChannelState& state)
     {
         const auto& slot = state.plugins.getReference (i);
 
-        const int target = findMatch (slot.pluginIdentifier, i);
+        // Prefer the slot this plugin was actually saved in; fall back to
+        // position for projects saved before slots were recorded.
+        const int preferred = slot.slotIndex >= 0 ? slot.slotIndex : i;
+        const int target = findMatch (slot.pluginIdentifier, preferred);
         if (target < 0)
         {
             // That plugin is no longer in this chain. Leave whatever is here

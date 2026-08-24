@@ -379,8 +379,12 @@ private:
     //==========================================================================
     // Helpers
     void scanForPlugins (bool clearCache = false);
-    void showAddPluginMenu (int channelIndex);
-    void showAddPluginMenuForFxBus();
+    /** @param slot  target slot, or -1 for the first free one. */
+    void showAddPluginMenu (int channelIndex, int slot);
+    void showAddPluginMenuForFxBus (int slot);
+
+    /** Tells the user a plugin could not be placed because the rack is full. */
+    void warnRackFull();
     void showKnobColorMenu (juce::Component* knob);
     void openAsioSettings();
     void showSetlistPanel();

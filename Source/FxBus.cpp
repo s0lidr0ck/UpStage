@@ -4,6 +4,8 @@
 FxBus::FxBus (juce::AudioPluginFormatManager& fm)
     : formatManager (fm)
 {
+    // Fixed rack: every slot exists from here on, most are empty.
+    pluginChain.insertMultiple (0, nullptr, MAX_FX_SLOTS);
 }
 
 FxBus::~FxBus()
@@ -41,7 +43,7 @@ void FxBus::prepare (double sampleRate, int blockSize)
     juce::ScopedLock sl (chainLock);
     for (auto* entry : pluginChain)
     {
-        if (entry->processor != nullptr)
+        if (entry != nullptr && entry->processor != nullptr)
         {
             entry->processor->setRateAndBufferSizeDetails (sampleRate, blockSize);
             entry->processor->prepareToPlay (sampleRate, blockSize);
@@ -53,33 +55,72 @@ void FxBus::releaseResources()
 {
     juce::ScopedLock sl (chainLock);
     for (auto* entry : pluginChain)
-        if (entry->processor != nullptr)
+        if (entry != nullptr && entry->processor != nullptr)
             entry->processor->releaseResources();
 }
 
 //==============================================================================
+bool FxBus::isSlotEmpty (int slot) const
+{
+    juce::ScopedLock sl (chainLock);
+    if (! juce::isPositiveAndBelow (slot, pluginChain.size())) return true;
+    return pluginChain[slot] == nullptr;
+}
+
+int FxBus::findFirstFreeSlot() const
+{
+    juce::ScopedLock sl (chainLock);
+    for (int i = 0; i < pluginChain.size(); ++i)
+        if (pluginChain[i] == nullptr)
+            return i;
+    return -1;
+}
+
+bool FxBus::placeEntry (PluginEntry* entry, int slot,
+                        const std::function<void(bool)>& callback)
+{
+    bool placed = false;
+    {
+        juce::ScopedLock sl (chainLock);
+
+        if (slot < 0)
+        {
+            for (int i = 0; i < pluginChain.size(); ++i)
+                if (pluginChain[i] == nullptr) { slot = i; break; }
+        }
+
+        if (juce::isPositiveAndBelow (slot, pluginChain.size())
+            && pluginChain[slot] == nullptr)
+        {
+            pluginChain.set (slot, entry);
+            placed = true;
+        }
+    }
+
+    if (! placed)
+    {
+        juce::Logger::writeToLog ("FxBus: no free slot for plugin");
+        disposeEntry (entry);
+    }
+
+    if (callback) callback (placed);
+    return placed;
+}
+
 bool FxBus::addPlugin (const juce::PluginDescription& desc,
+                       int slot,
                        std::function<void(bool)> callback)
 {
     formatManager.createPluginInstanceAsync (
         desc, currentSampleRate, currentBlockSize,
-        [this, callback, desc] (std::unique_ptr<juce::AudioPluginInstance> instance,
-                                const juce::String& errorMessage)
+        [this, callback, desc, slot] (std::unique_ptr<juce::AudioPluginInstance> instance,
+                                      const juce::String& errorMessage)
         {
             if (instance == nullptr)
             {
                 juce::Logger::writeToLog ("FxBus: failed to load plugin: " + errorMessage);
                 if (callback) callback (false);
                 return;
-            }
-
-            {
-                juce::ScopedLock sl (chainLock);
-                if (pluginChain.size() >= MAX_FX_SLOTS)
-                {
-                    if (callback) callback (false);
-                    return;
-                }
             }
 
             auto layout = instance->getBusesLayout();
@@ -100,24 +141,22 @@ bool FxBus::addPlugin (const juce::PluginDescription& desc,
             entry->identifier = desc.createIdentifierString();
             entry->bypassed   = false;
 
-            {
-                juce::ScopedLock sl (chainLock);
-                pluginChain.add (entry);
-            }
-
-            if (callback) callback (true);
+            placeEntry (entry, slot, callback);
         });
 
     return true;
 }
 
-void FxBus::removePlugin (int index)
+void FxBus::removePlugin (int slot)
 {
     PluginEntry* entry = nullptr;
     {
         juce::ScopedLock sl (chainLock);
-        if (juce::isPositiveAndBelow (index, pluginChain.size()))
-            entry = pluginChain.removeAndReturn (index);
+        if (juce::isPositiveAndBelow (slot, pluginChain.size()))
+        {
+            entry = pluginChain[slot];
+            pluginChain.set (slot, nullptr);   // empty in place
+        }
     }
     disposeEntry (entry);
 }
@@ -128,9 +167,22 @@ void FxBus::clearAllPlugins()
     {
         juce::ScopedLock sl (chainLock);
         doomed.swapWith (pluginChain);
+        pluginChain.insertMultiple (0, nullptr, MAX_FX_SLOTS);
     }
     for (auto* e : doomed)
         disposeEntry (e);
+}
+
+void FxBus::swapSlots (int slotA, int slotB)
+{
+    juce::ScopedLock sl (chainLock);
+    if (slotA == slotB) return;
+    if (! juce::isPositiveAndBelow (slotA, pluginChain.size())) return;
+    if (! juce::isPositiveAndBelow (slotB, pluginChain.size())) return;
+
+    auto* a = pluginChain[slotA];
+    pluginChain.set (slotA, pluginChain[slotB]);
+    pluginChain.set (slotB, a);
 }
 
 void FxBus::openPluginEditor (int index)
@@ -176,40 +228,43 @@ void FxBus::openPluginEditor (int index)
     entry->editorWindow = new FxEditorWindow (proc);
 }
 
-void FxBus::setPluginBypassed (int index, bool b)
+void FxBus::setPluginBypassed (int slot, bool b)
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (index, pluginChain.size()))
-        pluginChain[index]->bypassed = b;
+    if (auto* entry = pluginChain[slot])
+        entry->bypassed = b;
 }
 
-bool FxBus::isPluginBypassed (int index) const
+bool FxBus::isPluginBypassed (int slot) const
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (index, pluginChain.size()))
-        return pluginChain[index]->bypassed;
+    if (auto* entry = pluginChain[slot])
+        return entry->bypassed;
     return false;
 }
 
 int FxBus::getNumPlugins() const
 {
     juce::ScopedLock sl (chainLock);
-    return pluginChain.size();
+    int n = 0;
+    for (auto* entry : pluginChain)
+        if (entry != nullptr) ++n;
+    return n;
 }
 
-juce::AudioProcessor* FxBus::getPlugin (int index) const
+juce::AudioProcessor* FxBus::getPlugin (int slot) const
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (index, pluginChain.size()))
-        return pluginChain[index]->processor.get();
+    if (auto* entry = pluginChain[slot])
+        return entry->processor.get();
     return nullptr;
 }
 
-juce::String FxBus::getPluginIdentifier (int index) const
+juce::String FxBus::getPluginIdentifier (int slot) const
 {
     juce::ScopedLock sl (chainLock);
-    if (juce::isPositiveAndBelow (index, pluginChain.size()))
-        return pluginChain[index]->identifier;
+    if (auto* entry = pluginChain[slot])
+        return entry->identifier;
     return {};
 }
 
@@ -236,11 +291,9 @@ void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples, juce
     if (! sl.isLocked())
         return;
 
-    if (pluginChain.isEmpty())
-        return;
-
     for (auto* entry : pluginChain)
     {
+        if (entry == nullptr)            continue;   // empty slot
         if (entry->processor == nullptr) continue;
         if (entry->bypassed)             continue;
 
@@ -270,9 +323,13 @@ FxBus::State FxBus::getState() const
     s.bypassed = bypassed.load();
 
     juce::ScopedLock sl (chainLock);
-    for (auto* entry : pluginChain)
+    for (int i = 0; i < pluginChain.size(); ++i)
     {
+        auto* entry = pluginChain[i];
+        if (entry == nullptr) continue;   // empty slot - saved as a gap
+
         PluginSlotState slot;
+        slot.slotIndex        = i;
         slot.pluginIdentifier = entry->identifier;
         slot.pluginName       = entry->processor ? entry->processor->getName() : "";
         slot.isBypassed       = entry->bypassed;
@@ -305,15 +362,21 @@ void FxBus::setState (const State& s)
     // Prefer the same index - the overwhelmingly common case, and it keeps two
     // instances of the same plugin in their own slots - then fall back to any
     // unclaimed slot holding that plugin, so a reordered chain still restores.
+    auto occupiedBy = [&] (int i, const juce::String& id)
+    {
+        return juce::isPositiveAndBelow (i, pluginChain.size())
+            && ! claimed[i]
+            && pluginChain[i] != nullptr
+            && pluginChain[i]->identifier == id;
+    };
+
     auto findMatch = [&] (const juce::String& id, int preferredIndex) -> int
     {
-        if (juce::isPositiveAndBelow (preferredIndex, pluginChain.size())
-            && ! claimed[preferredIndex]
-            && pluginChain[preferredIndex]->identifier == id)
+        if (occupiedBy (preferredIndex, id))
             return preferredIndex;
 
         for (int i = 0; i < pluginChain.size(); ++i)
-            if (! claimed[i] && pluginChain[i]->identifier == id)
+            if (occupiedBy (i, id))
                 return i;
 
         return -1;
@@ -325,7 +388,8 @@ void FxBus::setState (const State& s)
     {
         const auto& slot = s.plugins.getReference (i);
 
-        const int target = findMatch (slot.pluginIdentifier, i);
+        const int preferred = slot.slotIndex >= 0 ? slot.slotIndex : i;
+        const int target = findMatch (slot.pluginIdentifier, preferred);
         if (target < 0)
         {
             // That plugin is no longer in this chain. Leave whatever is here

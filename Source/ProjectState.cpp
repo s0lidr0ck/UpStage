@@ -238,6 +238,7 @@ juce::XmlElement* ProjectState::channelToXml (const ChannelState& ch, int index)
     {
         auto* plugEl = el->createNewChildElement ("Plugin");
         plugEl->setAttribute ("identifier", slot.pluginIdentifier);
+        plugEl->setAttribute ("slot",       slot.slotIndex);
         plugEl->setAttribute ("name",       slot.pluginName);
         plugEl->setAttribute ("bypassed",   slot.isBypassed ? 1 : 0);
         plugEl->setAttribute ("tint",       (int) slot.tint.getARGB());
@@ -278,6 +279,9 @@ bool ProjectState::xmlToChannel (const juce::XmlElement* el, ChannelState& ch)
     {
         PluginSlotState slot;
         slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");
+        // -1 when absent: a project saved before fixed slots, which loads
+        // packed from the top exactly as it always did.
+        slot.slotIndex        = plugEl->getIntAttribute ("slot", -1);
         slot.pluginName       = plugEl->getStringAttribute ("name");
         slot.isBypassed       = plugEl->getIntAttribute ("bypassed", 0) != 0;
         slot.tint             = juce::Colour ((juce::uint32) plugEl->getIntAttribute ("tint", 0));
@@ -431,6 +435,7 @@ juce::XmlElement* ProjectState::fxBusStateToXml (const ProjectData::FxBusState& 
     {
         auto* plugEl = el->createNewChildElement ("Plugin");
         plugEl->setAttribute ("identifier", slot.pluginIdentifier);
+        plugEl->setAttribute ("slot",       slot.slotIndex);
         plugEl->setAttribute ("name",       slot.pluginName);
         plugEl->setAttribute ("bypassed",   slot.isBypassed ? 1 : 0);
         plugEl->setAttribute ("tint",       (int) slot.tint.getARGB());
@@ -464,6 +469,9 @@ bool ProjectState::xmlToFxBusState (const juce::XmlElement* el,
     {
         PluginSlotState slot;
         slot.pluginIdentifier = plugEl->getStringAttribute ("identifier");
+        // -1 when absent: a project saved before fixed slots, which loads
+        // packed from the top exactly as it always did.
+        slot.slotIndex        = plugEl->getIntAttribute ("slot", -1);
         slot.pluginName       = plugEl->getStringAttribute ("name");
         slot.isBypassed       = plugEl->getIntAttribute    ("bypassed", 0) != 0;
         slot.tint             = juce::Colour ((juce::uint32) plugEl->getIntAttribute ("tint", 0));

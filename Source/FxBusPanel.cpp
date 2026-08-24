@@ -24,7 +24,7 @@ FxBusPanel::FxBusPanel (FxBus& b)
 
     addFxButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2220));
     addFxButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88775a));
-    addFxButton.onClick = [this] { if (onAddPluginClicked) onAddPluginClicked(); };
+    addFxButton.onClick = [this] { if (onAddPluginClicked) onAddPluginClicked (-1); };  // -1 = first free slot
     addAndMakeVisible (addFxButton);
 
     // Master knob (replaces fader)
@@ -86,12 +86,10 @@ FxBusPanel::~FxBusPanel()
 //==============================================================================
 void FxBusPanel::rebuildSlots()
 {
-    int numPlugins = bus.getNumPlugins();
-
     for (int i = 0; i < FxBus::MAX_FX_SLOTS; ++i)
     {
         slots[i].index = i;
-        if (i < numPlugins)
+        if (! bus.isSlotEmpty (i))
         {
             auto* proc = bus.getPlugin (i);
             slots[i].name = (proc != nullptr) ? proc->getName() : "(unknown)";
@@ -373,7 +371,7 @@ void FxBusPanel::mouseDown (const juce::MouseEvent& e)
     {
         if (e.mods.isLeftButtonDown())
         {
-            if (onAddPluginClicked) onAddPluginClicked();
+            if (onAddPluginClicked) onAddPluginClicked (slotIndex);
         }
     }
     else if (e.mods.isLeftButtonDown() && ! e.mods.isRightButtonDown())
@@ -391,7 +389,7 @@ void FxBusPanel::mouseDown (const juce::MouseEvent& e)
 void FxBusPanel::showSlotContextMenu (int slotIndex)
 {
     juce::PopupMenu menu;
-    bool hasPlugin = slotIndex >= 0 && slotIndex < bus.getNumPlugins() && ! slots[slotIndex].empty;
+    bool hasPlugin = slotIndex >= 0 && ! bus.isSlotEmpty (slotIndex);
     auto& clipboard = ChannelStripPanel::getClipboard();
     bool clipboardHasData = clipboard.pluginIdentifier.isNotEmpty();
 
@@ -488,7 +486,7 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                 }
                 else if (onPastePlugin)
                 {
-                    onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed);
+                    onPastePlugin (cb.pluginIdentifier, cb.stateData, cb.bypassed, slotIndex);
                 }
                 refresh();
                 break;
@@ -525,7 +523,7 @@ void FxBusPanel::addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const
 
 void FxBusPanel::showNicknameDialog (int slotIndex)
 {
-    if (slotIndex < 0 || slotIndex >= bus.getNumPlugins()) return;
+    if (slotIndex < 0 || bus.isSlotEmpty (slotIndex)) return;
 
     auto* aw = new juce::AlertWindow ("Plugin Nickname",
                                        "Enter a display name for this plugin.\nLeave blank to use the original name.",
@@ -537,7 +535,7 @@ void FxBusPanel::showNicknameDialog (int slotIndex)
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
         [this, slotIndex, aw] (int result)
         {
-            if (result == 1 && slotIndex < bus.getNumPlugins())
+            if (result == 1 && ! bus.isSlotEmpty (slotIndex))
             {
                 auto nick = aw->getTextEditorContents ("nickname").trim();
                 slots[slotIndex].nickname = nick;

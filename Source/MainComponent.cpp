@@ -439,22 +439,24 @@ MainComponent::MainComponent() : menuBar (this)
 
         // Plugin chain panel
         channelStripPanels[i] = std::make_unique<ChannelStripPanel> (*channels[i], "ch" + juce::String (i));
-        channelStripPanels[i]->onAddPluginClicked = [this, i] { showAddPluginMenu (i); };
-        channelStripPanels[i]->onAddInternalRow = [this, i] (int kind)
+        channelStripPanels[i]->onAddPluginClicked = [this, i] (int slot) { showAddPluginMenu (i, slot); };
+        channelStripPanels[i]->onAddInternalRow = [this, i] (int kind, int slot)
         {
-            channels[i]->addInternalRow (kind, [this, i] (bool)
+            channels[i]->addInternalRow (kind, slot, [this, i] (bool ok)
             {
+                if (! ok) warnRackFull();
                 channelStripPanels[i]->refresh();
             });
         };
-        channelStripPanels[i]->onPastePlugin = [this, i] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+        channelStripPanels[i]->onPastePlugin = [this, i] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed, int slot)
         {
             if (auto found = knownPluginList.getTypeForIdentifierString (id))
             {
-                channels[i]->addPlugin (*found, [this, i, state, bypassed] (bool ok)
+                // Paste replaces whatever is in the target slot, in place.
+                channels[i]->removePlugin (slot);
+                channels[i]->addPlugin (*found, slot, [this, i, state, bypassed, slot] (bool ok)
                 {
-                    if (! ok) return;
-                    int slot = channels[i]->getNumPlugins() - 1;
+                    if (! ok) { warnRackFull(); return; }
                     if (state.getSize() > 0)
                         if (auto* proc = channels[i]->getPlugin (slot))
                             proc->setStateInformation (state.getData(), (int) state.getSize());
@@ -522,22 +524,23 @@ MainComponent::MainComponent() : menuBar (this)
     addAndMakeVisible (*inputChannelMeterOut);
 
     inputChannelPanel = std::make_unique<ChannelStripPanel> (*inputChannel, "in");
-    inputChannelPanel->onAddPluginClicked = [this] { showAddPluginMenu (-1); };
-    inputChannelPanel->onAddInternalRow = [this] (int kind)
+    inputChannelPanel->onAddPluginClicked = [this] (int slot) { showAddPluginMenu (-1, slot); };
+    inputChannelPanel->onAddInternalRow = [this] (int kind, int slot)
     {
-        inputChannel->addInternalRow (kind, [this] (bool)
+        inputChannel->addInternalRow (kind, slot, [this] (bool ok)
         {
+            if (! ok) warnRackFull();
             inputChannelPanel->refresh();
         });
     };
-    inputChannelPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+    inputChannelPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed, int slot)
     {
         if (auto found = knownPluginList.getTypeForIdentifierString (id))
         {
-            inputChannel->addPlugin (*found, [this, state, bypassed] (bool ok)
+            inputChannel->removePlugin (slot);
+            inputChannel->addPlugin (*found, slot, [this, state, bypassed, slot] (bool ok)
             {
-                if (! ok) return;
-                int slot = inputChannel->getNumPlugins() - 1;
+                if (! ok) { warnRackFull(); return; }
                 if (state.getSize() > 0)
                     if (auto* proc = inputChannel->getPlugin (slot))
                         proc->setStateInformation (state.getData(), (int) state.getSize());
@@ -551,7 +554,7 @@ MainComponent::MainComponent() : menuBar (this)
     addInputPluginButton.setButtonText ("+ Add Plugin");
     addInputPluginButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2a2220));
     addInputPluginButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff88775a));
-    addInputPluginButton.onClick = [this] { showAddPluginMenu (-1); };
+    addInputPluginButton.onClick = [this] { showAddPluginMenu (-1, -1); };
     addAndMakeVisible (addInputPluginButton);
 
     // Input direct knob (sends post-input-FX signal directly to master mix)
@@ -618,15 +621,15 @@ MainComponent::MainComponent() : menuBar (this)
 
     // FX Bus panel
     fxBusPanel = std::make_unique<FxBusPanel> (*fxBus);
-    fxBusPanel->onAddPluginClicked = [this] { showAddPluginMenuForFxBus(); };
-    fxBusPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed)
+    fxBusPanel->onAddPluginClicked = [this] (int slot) { showAddPluginMenuForFxBus (slot); };
+    fxBusPanel->onPastePlugin = [this] (const juce::String& id, const juce::MemoryBlock& state, bool bypassed, int slot)
     {
         if (auto found = knownPluginList.getTypeForIdentifierString (id))
         {
-            fxBus->addPlugin (*found, [this, state, bypassed] (bool ok)
+            fxBus->removePlugin (slot);
+            fxBus->addPlugin (*found, slot, [this, state, bypassed, slot] (bool ok)
             {
-                if (! ok) return;
-                int slot = fxBus->getNumPlugins() - 1;
+                if (! ok) { warnRackFull(); return; }
                 if (state.getSize() > 0)
                     if (auto* proc = fxBus->getPlugin (slot))
                         proc->setStateInformation (state.getData(), (int) state.getSize());
@@ -2332,7 +2335,8 @@ void MainComponent::resized()
         inputChannelLabel.setBounds (strip.removeFromTop (28));
         strip.removeFromTop (2);
 
-        auto pluginArea = strip.removeFromTop (230);
+        // Same rack height as the channel strips, so all five racks line up.
+        auto pluginArea = strip.removeFromTop (inputChannelPanel->getPreferredHeight());
         inputChannelPanel->setBounds (pluginArea);
         addInputPluginButton.setVisible (false);
         strip.removeFromTop (4);
@@ -2375,8 +2379,10 @@ void MainComponent::resized()
         channelLabels[i].setBounds (strip.removeFromTop (28));
         strip.removeFromTop (2);
 
-        // Plugin chain panel at top (slots handle add-plugin clicks)
-        auto pluginArea = strip.removeFromTop (230);
+        // Plugin chain panel at top (slots handle add-plugin clicks). Height
+        // follows the slot count; the meters/fader row below is sized from
+        // whatever is left, so the fader absorbs the difference.
+        auto pluginArea = strip.removeFromTop (channelStripPanels[i]->getPreferredHeight());
         channelStripPanels[i]->setBounds (pluginArea);
         addPluginButtons[i].setVisible (false);
         strip.removeFromTop (4);
@@ -2643,7 +2649,7 @@ void MainComponent::buttonClicked (juce::Button* b)
     // Channel strip controls
     for (int i = 0; i < NUM_CHANNELS; ++i)
     {
-        if (b == &addPluginButtons[i]) { showAddPluginMenu (i); return; }
+        if (b == &addPluginButtons[i]) { showAddPluginMenu (i, -1); return; }
     }
 
     // Scene recall / capture
@@ -2938,14 +2944,14 @@ bool MainComponent::resolveSlot (const juce::String& stripId, int slotIndex,
         panel = channelStripPanels[ch].get();
     }
 
-    return strip != nullptr && slotIndex < strip->getNumPlugins();
+    return strip != nullptr && ! strip->isSlotEmpty (slotIndex);
 }
 
 void MainComponent::setSlotBypassed (const juce::String& stripId, int slotIndex, bool bypassed)
 {
     if (stripId == "fx")
     {
-        if (slotIndex >= fxBus->getNumPlugins()) return;
+        if (fxBus->isSlotEmpty (slotIndex)) return;
         fxBus->setPluginBypassed (slotIndex, bypassed);
         if (fxBusPanel) fxBusPanel->refresh();
         return;
@@ -2962,7 +2968,7 @@ void MainComponent::setSlotBypassed (const juce::String& stripId, int slotIndex,
 bool MainComponent::isSlotBypassed (const juce::String& stripId, int slotIndex)
 {
     if (stripId == "fx")
-        return slotIndex < fxBus->getNumPlugins() && fxBus->isPluginBypassed (slotIndex);
+        return ! fxBus->isSlotEmpty (slotIndex) && fxBus->isPluginBypassed (slotIndex);
 
     ChannelStrip*      strip = nullptr;
     ChannelStripPanel* panel = nullptr;
@@ -3467,7 +3473,10 @@ void MainComponent::restoreChainInto (ChannelStrip& strip,
         const bool              bypassed = slot.isBypassed;
         const juce::Colour      tint     = slot.tint;
         const juce::String      nick     = slot.nickname;
-        const int               slotIdx  = slotIndex;
+
+        // Projects saved before fixed slots carry no slot number; those load
+        // packed from the top, which is exactly where they used to sit.
+        const int               slotIdx  = slot.slotIndex >= 0 ? slot.slotIndex : slotIndex;
 
         // Fires on the message thread once the slot has landed (or failed).
         auto applyAndNotify = [target, slotIdx, blob, bypassed, tint, nick, onSlotLoaded] (bool ok)
@@ -3489,7 +3498,7 @@ void MainComponent::restoreChainInto (ChannelStrip& strip,
         {
             // Role restores from the state blob; kind here only picks the class.
             const int rowKind = slot.pluginIdentifier == NamIrProcessor::kIdentifier ? 2 : 0;
-            strip.addInternalRow (rowKind, applyAndNotify);
+            strip.addInternalRow (rowKind, slotIdx, applyAndNotify);
             continue;
         }
 
@@ -3503,7 +3512,7 @@ void MainComponent::restoreChainInto (ChannelStrip& strip,
             desc.name             = slot.pluginName;
         }
 
-        strip.addPlugin (desc, applyAndNotify);
+        strip.addPlugin (desc, slotIdx, applyAndNotify);
     }
 }
 
@@ -3545,9 +3554,9 @@ void MainComponent::loadProjectPlugins (const ProjectData& data)
         bool bypassed               = slot.isBypassed;
         juce::Colour slotTint       = slot.tint;
         juce::String slotNick       = slot.nickname;
-        int  slotIdx                = slotIndex;
+        int  slotIdx                = slot.slotIndex >= 0 ? slot.slotIndex : slotIndex;
 
-        fxBus->addPlugin (desc, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
+        fxBus->addPlugin (desc, slotIdx, [this, slotIdx, stateBlob, bypassed, slotTint, slotNick] (bool ok)
         {
             if (ok)
             {
@@ -4066,7 +4075,15 @@ void MainComponent::scanForPlugins (bool clearCache)
     scanner->launchThread();
 }
 
-void MainComponent::showAddPluginMenu (int chanIdx)
+void MainComponent::warnRackFull()
+{
+    juce::AlertWindow::showMessageBoxAsync (
+        juce::AlertWindow::WarningIcon, "Rack Full",
+        "That slot is taken and there is no free slot left on this strip.\n\n"
+        "Remove a plugin to make room.", "OK");
+}
+
+void MainComponent::showAddPluginMenu (int chanIdx, int slot)
 {
     if (knownPluginList.getTypes().isEmpty())
     {
@@ -4077,11 +4094,11 @@ void MainComponent::showAddPluginMenu (int chanIdx)
     }
 
     auto* browser = new PluginBrowserWindow (knownPluginList);
-    browser->onPluginSelected = [this, chanIdx] (const juce::PluginDescription& desc)
+    browser->onPluginSelected = [this, chanIdx, slot] (const juce::PluginDescription& desc)
     {
         if (chanIdx == -1)
         {
-            inputChannel->addPlugin (desc, [this] (bool ok) {
+            inputChannel->addPlugin (desc, slot, [this] (bool ok) {
                 if (! ok)
                     juce::AlertWindow::showMessageBoxAsync (
                         juce::AlertWindow::WarningIcon, "UpStage", "Failed to load plugin.", "OK");
@@ -4093,7 +4110,7 @@ void MainComponent::showAddPluginMenu (int chanIdx)
         }
         else
         {
-            channels[chanIdx]->addPlugin (desc, [this, chanIdx] (bool ok) {
+            channels[chanIdx]->addPlugin (desc, slot, [this, chanIdx] (bool ok) {
                 if (! ok)
                     juce::AlertWindow::showMessageBoxAsync (
                         juce::AlertWindow::WarningIcon, "UpStage", "Failed to load plugin.", "OK");
@@ -4115,7 +4132,7 @@ void MainComponent::showAddPluginMenu (int chanIdx)
     opts.launchAsync();
 }
 
-void MainComponent::showAddPluginMenuForFxBus()
+void MainComponent::showAddPluginMenuForFxBus (int slot)
 {
     if (knownPluginList.getTypes().isEmpty())
     {
@@ -4126,9 +4143,9 @@ void MainComponent::showAddPluginMenuForFxBus()
     }
 
     auto* browser = new PluginBrowserWindow (knownPluginList);
-    browser->onPluginSelected = [this] (const juce::PluginDescription& desc)
+    browser->onPluginSelected = [this, slot] (const juce::PluginDescription& desc)
     {
-        fxBus->addPlugin (desc, [this] (bool ok) {
+        fxBus->addPlugin (desc, slot, [this] (bool ok) {
             if (! ok)
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::AlertWindow::WarningIcon, "UpStage", "Failed to load FX plugin.", "OK");

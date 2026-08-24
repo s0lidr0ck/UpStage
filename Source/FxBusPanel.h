@@ -12,9 +12,10 @@ class FxBusPanel : public juce::Component,
                    public juce::Slider::Listener
 {
 public:
-    std::function<void()> onAddPluginClicked;
+    /** Requests a plugin for `slot` (-1 = first free, from the Add Insert button). */
+    std::function<void(int slot)> onAddPluginClicked;
     std::function<void(float /*dB*/)> onMasterFaderChanged;
-    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed)> onPastePlugin;
+    std::function<void(const juce::String& identifier, const juce::MemoryBlock& state, bool bypassed, int slot)> onPastePlugin;
 
     juce::Array<PluginAppearanceState> getAppearances() const;
     void setAppearances (const juce::Array<PluginAppearanceState>& appearances);
