@@ -15,15 +15,25 @@ public:
 
     ~GoniometerMeter() override { stopTimer(); }
 
+    /** Called from the AUDIO thread. Lock-free: this is the only writer, and
+        the only reader (computePolarDistribution, on the message thread) just
+        trails the published write index. A torn read would at worst mix a few
+        samples from the previous lap of the ring into one 512-sample analysis
+        window, which is invisible in a 30Hz display - and is a far better
+        trade than blocking the audio thread on a UI repaint. */
     void pushSamples (const float* leftData, const float* rightData, int numSamples)
     {
-        juce::ScopedLock sl (bufferLock);
+        int w = writeIndex.load (std::memory_order_relaxed);
+
         for (int i = 0; i < numSamples; ++i)
         {
-            sampleBuffer[writeIndex * 2]     = leftData[i];
-            sampleBuffer[writeIndex * 2 + 1] = rightData[i];
-            writeIndex = (writeIndex + 1) % BUFFER_SIZE;
+            sampleBuffer[w * 2]     = leftData[i];
+            sampleBuffer[w * 2 + 1] = rightData[i];
+            w = (w + 1) % BUFFER_SIZE;
         }
+
+        // Release so the reader sees the samples written above before the index.
+        writeIndex.store (w, std::memory_order_release);
     }
 
     void paint (juce::Graphics& g) override
@@ -151,9 +161,8 @@ private:
     static constexpr int NUM_BINS = 91;
     static constexpr float PEAK_DECAY = 0.97f;
 
-    juce::CriticalSection bufferLock;
-    std::vector<float> sampleBuffer;
-    int writeIndex = 0;
+    std::vector<float> sampleBuffer;   // fixed size; never resized after construction
+    std::atomic<int>   writeIndex { 0 };
 
     std::vector<float> polarBins;
     std::vector<float> peakBins;
@@ -183,10 +192,11 @@ private:
     {
         std::fill (polarBins.begin(), polarBins.end(), 0.0f);
 
-        juce::ScopedLock sl (bufferLock);
+        // Acquire pairs with the release in pushSamples.
+        const int w = writeIndex.load (std::memory_order_acquire);
 
         int analysisSize = juce::jmin (512, BUFFER_SIZE);
-        int startIdx = (writeIndex - analysisSize + BUFFER_SIZE) % BUFFER_SIZE;
+        int startIdx = (w - analysisSize + BUFFER_SIZE) % BUFFER_SIZE;
 
         for (int i = 0; i < analysisSize; ++i)
         {

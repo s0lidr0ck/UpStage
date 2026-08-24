@@ -253,6 +253,15 @@ private:
     //==========================================================================
     // MIDI queue (audio thread → message thread)
     juce::MidiBuffer  pendingMidi;
+
+    // Audio-thread MidiBuffer scratch. Members, not locals: MidiBuffer::clear()
+    // keeps its capacity, so after the first few blocks these stop allocating
+    // entirely. As locals they heap-allocated ~6 times per block whenever MIDI
+    // was flowing - which, with Active Sensing or MIDI clock, is always.
+    juce::MidiBuffer   rtIncomingMidi;   // swapped out of pendingMidi
+    juce::MidiBuffer   rtInputMidi;      // pre-FX input channel
+    juce::MidiBuffer   rtChannelMidi;    // refilled per channel
+    juce::MidiBuffer   rtFxMidi;         // master insert chain
     juce::CriticalSection midiLock;
 
     //==========================================================================

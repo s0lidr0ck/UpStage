@@ -35,9 +35,8 @@ juce::Array<MidiRule> MidiTranslator::getRules() const
 }
 
 //==============================================================================
-juce::MidiMessage MidiTranslator::process (const juce::MidiMessage& msg)
+juce::MidiMessage MidiTranslator::processLocked (const juce::MidiMessage& msg)
 {
-    juce::ScopedLock sl (lock);
     for (int i = 0; i < rules.size(); ++i)
     {
         if (matchesRule (rules[i], msg))
@@ -46,16 +45,30 @@ juce::MidiMessage MidiTranslator::process (const juce::MidiMessage& msg)
     return msg;
 }
 
+juce::MidiMessage MidiTranslator::process (const juce::MidiMessage& msg)
+{
+    juce::ScopedLock sl (lock);
+    return processLocked (msg);
+}
+
 void MidiTranslator::processBuffer (juce::MidiBuffer& buffer)
 {
-    juce::MidiBuffer translated;
+    // One try-lock for the whole buffer, not one blocking lock per event.
+    juce::ScopedTryLock sl (lock);
+    if (! sl.isLocked())
+        return;                 // rules are being edited - pass through untouched
+
+    translated.clear();         // keeps capacity; no per-block allocation
     for (const auto meta : buffer)
     {
-        auto out = process (meta.getMessage());
+        auto out = processLocked (meta.getMessage());
         if (out.getRawDataSize() > 0)
             translated.addEvent (out, meta.samplePosition);
     }
-    buffer = translated;
+
+    // swapWith, not assignment: O(1), and `buffer`'s old storage becomes the
+    // scratch for next block instead of being freed and reallocated.
+    buffer.swapWith (translated);
 }
 
 //==============================================================================

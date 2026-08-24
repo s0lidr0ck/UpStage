@@ -928,6 +928,20 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
     masterMix   .setSize (2, blockSize, false, true, false);
     directSignal.setSize (2, blockSize, false, true, false);
     silentBuffer.setSize (2, blockSize, false, true, false);
+
+    // Grow the MIDI scratch buffers once, here, rather than discovering the
+    // capacity a block at a time on the audio thread. ensureSize takes bytes;
+    // 2048 is far more MIDI than a single block will ever carry.
+    {
+        const int midiBytes = 2048;
+        rtIncomingMidi.ensureSize (midiBytes);
+        rtInputMidi   .ensureSize (midiBytes);
+        rtChannelMidi .ensureSize (midiBytes);
+        rtFxMidi      .ensureSize (midiBytes);
+
+        juce::ScopedLock sl (midiLock);
+        pendingMidi.ensureSize (midiBytes);
+    }
     silentBuffer.clear();
     for (auto& b : channelOutputs)
         b.setSize (2, blockSize, false, true, false);
@@ -1040,8 +1054,8 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     inputLevelInR.store (work.getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
     // ---- Input channel pre-FX ----
-    juce::MidiBuffer inputMidi; // Input channel gets MIDI too
-    inputChannel->processBlock (work, inputMidi);
+    rtInputMidi.clear();        // Input channel gets MIDI too
+    inputChannel->processBlock (work, rtInputMidi);
 
     // ---- Measure output level (after FX) ----
     inputLevelOutL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
@@ -1058,12 +1072,16 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     recorder.writeInputBlock (work);
 
     // ---- MIDI ----
-    juce::MidiBuffer midi;
+    // swapWith is O(1) and allocates nothing, so the audio thread holds
+    // midiLock for a couple of pointer swaps rather than for a buffer copy.
+    // pendingMidi comes back holding rtIncomingMidi's already-grown storage,
+    // which is what stops addEvent() allocating on the MIDI thread as well.
+    rtIncomingMidi.clear();
     {
         juce::ScopedLock sl (midiLock);
-        midi = pendingMidi;
-        pendingMidi.clear();
+        rtIncomingMidi.swapWith (pendingMidi);
     }
+    auto& midi = rtIncomingMidi;
     midiTranslator.processBuffer (midi);
 
     // Parse PC messages
@@ -1140,17 +1158,22 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
             channelInputLevelR[i].store (channelOutputs[i].getMagnitude (1, 0, info.numSamples), std::memory_order_relaxed);
 
             {
-                juce::MidiBuffer channelMidi (midi);
+                // Each channel gets its own copy - plugins may consume or
+                // rewrite it - but refilling one member buffer reuses the
+                // storage instead of allocating a fresh one per channel.
+                rtChannelMidi.clear();
+                rtChannelMidi.addEvents (midi, 0, -1, 0);
+
                 if (shouldProcess)
                 {
-                    channels[i]->processBlock (channelOutputs[i], channelMidi);
+                    channels[i]->processBlock (channelOutputs[i], rtChannelMidi);
                 }
                 else
                 {
                     // Drive inactive channels with silence so their plugins keep
                     // their internal state running (reusing the member buffer).
                     silentBuffer.clear();
-                    channels[i]->processBlock (silentBuffer, channelMidi);
+                    channels[i]->processBlock (silentBuffer, rtChannelMidi);
                 }
             }
 
@@ -1192,8 +1215,9 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
 
     // ---- Master insert chain ----
     {
-        juce::MidiBuffer fxMidi (midi);
-        fxBus->processBlock (work, info.numSamples, fxMidi);
+        rtFxMidi.clear();
+        rtFxMidi.addEvents (midi, 0, -1, 0);
+        fxBus->processBlock (work, info.numSamples, rtFxMidi);
     }
 
     // ---- Channel level meters ----
