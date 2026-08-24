@@ -62,6 +62,7 @@ class MainComponent : public juce::AudioAppComponent,
                       public juce::MenuBarModel,
                       public MidiLearnManager::Listener,
                       public juce::DragAndDropContainer,
+                      public juce::ChangeListener,
                       public juce::DragAndDropTarget,
                       public juce::FileDragAndDropTarget
 {
@@ -490,6 +491,41 @@ private:
         alone. Imports into the session only; it sticks when the project is
         saved. */
     void importMidiMapFromProject();
+
+    //==========================================================================
+    // Audio device health.
+    //
+    // Nothing used to notice if the interface went away: no audioDeviceError
+    // handler, no change listener. On stage that means silence with no
+    // explanation. Detection lives entirely on the message thread - a monitor
+    // AudioIODeviceCallback would be summed into the output from JUCE's
+    // uncleared temp buffer, so it has no business in the audio path.
+
+    /** True while the audio device is missing or stopped. */
+    bool audioDeviceLost = false;
+
+    /** Name of the device that was working, for the banner and for logging. */
+    juce::String lastGoodDeviceName;
+
+    /** Counts timer ticks between reconnect attempts while lost. */
+    int deviceRecoveryCounter = 0;
+
+    /** Consecutive failed health checks. Debounces the moment during startup
+        or a settings change when the device is legitimately not playing yet. */
+    int deviceLostStreak = 0;
+
+    /** Ticks between device health polls (30Hz timer, so ~2 per second). */
+    static constexpr int kDeviceCheckTicks = 15;
+    int deviceCheckCounter = 0;
+
+    /** Poll the device and drive the lost/recovered transitions. */
+    void checkAudioDeviceHealth();
+
+    /** Paint the "audio device lost" banner over the UI. */
+    void paintDeviceLostBanner (juce::Graphics& g);
+
+    /** juce::ChangeListener - AudioDeviceManager broadcasts on device change. */
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
 
     void showPluginManager();
     void showShortcutHelp();

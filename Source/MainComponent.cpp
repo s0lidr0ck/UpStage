@@ -804,6 +804,7 @@ MainComponent::MainComponent() : menuBar (this)
     //==========================================================================
     // Initialize audio with ASIO support
     // Add all available device types (Windows Audio, DirectSound, ASIO, etc.)
+    deviceManager.addChangeListener (this);
     deviceManager.createAudioDeviceTypes (deviceTypes);
 
     juce::String typeNames = "Available device types: ";
@@ -906,6 +907,7 @@ MainComponent::MainComponent() : menuBar (this)
 MainComponent::~MainComponent()
 {
     saveAudioDeviceState();
+    deviceManager.removeChangeListener (this);
     stopTimer();
     tapTempo.stopClock();
     shutdownAudio();
@@ -1775,6 +1777,9 @@ void MainComponent::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white.withAlpha (0.03f));
         g.drawHorizontalLine (statusBottom + 1, 0.0f, w);
     }
+
+    // Last, so it covers everything: you need to see this instantly on stage.
+    paintDeviceLostBanner (g);
 }
 
 void MainComponent::mouseDown (const juce::MouseEvent& e)
@@ -2893,6 +2898,13 @@ void MainComponent::timerCallback()
     }
 
     // Signal chain view
+
+    // Audio device health (~2 checks per second)
+    if (++deviceCheckCounter >= kDeviceCheckTicks)
+    {
+        deviceCheckCounter = 0;
+        checkAudioDeviceHealth();
+    }
 
     // Autosave (~60s at 30Hz timer)
     if (++autosaveCounter >= 1800)
@@ -4370,6 +4382,88 @@ void MainComponent::importMidiMapFromProject()
                     if (result == 1) doImport();
                 }));
         });
+}
+
+void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
+{
+    // AudioDeviceManager broadcasts whenever the device setup changes - which
+    // includes the device disappearing. Check immediately rather than waiting
+    // for the next poll.
+    if (source == &deviceManager)
+        checkAudioDeviceHealth();
+}
+
+void MainComponent::checkAudioDeviceHealth()
+{
+    auto* dev = deviceManager.getCurrentAudioDevice();
+    const bool healthy = (dev != nullptr && dev->isOpen() && dev->isPlaying());
+
+    if (healthy)
+    {
+        lastGoodDeviceName = dev->getName();
+        deviceLostStreak = 0;
+
+        if (audioDeviceLost)
+        {
+            // Recovered - either on its own or via restartLastAudioDevice().
+            audioDeviceLost = false;
+            deviceRecoveryCounter = 0;
+            juce::Logger::writeToLog ("Audio device recovered: " + lastGoodDeviceName);
+            updateStatusBar();
+            repaint();
+        }
+        return;
+    }
+
+    if (! audioDeviceLost)
+    {
+        // Debounce: the device is legitimately not playing for a moment while
+        // it opens at startup or after a settings change. Two consecutive bad
+        // checks (~1s) before we shout about it.
+        if (++deviceLostStreak < 2)
+            return;
+
+        audioDeviceLost = true;
+        deviceRecoveryCounter = 0;
+        juce::Logger::writeToLog ("Audio device lost: "
+            + (lastGoodDeviceName.isNotEmpty() ? lastGoodDeviceName : juce::String ("(none)")));
+        updateStatusBar();
+        repaint();
+        return;
+    }
+
+    // Still lost - retry roughly every two seconds. restartLastAudioDevice is a
+    // no-op when the hardware genuinely isn't there, so this is cheap to keep
+    // attempting, and it reconnects by itself when the interface comes back.
+    if (++deviceRecoveryCounter >= 4)
+    {
+        deviceRecoveryCounter = 0;
+        deviceManager.restartLastAudioDevice();
+    }
+}
+
+void MainComponent::paintDeviceLostBanner (juce::Graphics& g)
+{
+    if (! audioDeviceLost) return;
+
+    auto area = getLocalBounds().removeFromTop (52).reduced (8, 6);
+
+    g.setColour (juce::Colour (0xdd8a1f1f));
+    g.fillRoundedRectangle (area.toFloat(), 4.0f);
+    g.setColour (juce::Colour (0xffff9a9a));
+    g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 4.0f, 1.5f);
+
+    g.setColour (juce::Colours::white);
+    g.setFont (juce::Font (juce::FontOptions().withHeight (15.0f).withStyle ("Bold")));
+
+    auto msg = lastGoodDeviceName.isNotEmpty()
+        ? "AUDIO DEVICE LOST - " + lastGoodDeviceName
+        : juce::String ("NO AUDIO DEVICE");
+    g.drawText (msg, area.removeFromTop (20), juce::Justification::centred, true);
+
+    g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+    g.drawText ("Reconnecting... check the interface, then Settings > ASIO Device Settings",
+                area, juce::Justification::centred, true);
 }
 
 void MainComponent::showPluginManager()
