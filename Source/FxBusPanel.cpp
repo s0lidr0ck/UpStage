@@ -1,6 +1,11 @@
 #include "FxBusPanel.h"
 #include "MidiLearnHooks.h"
 
+static juce::String tunerAddressFor (const juce::String& midiParamId)
+{
+    return midiParamId.fromFirstOccurrenceOf (":", false, false);
+}
+
 //==============================================================================
 FxBusPanel::FxBusPanel (FxBus& b)
     : bus (b)
@@ -494,6 +499,7 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
         menu.addSeparator();
         menu.addItem (3, "Remove");
         addSlotMidiItems (menu, slotIndex);
+        addTunerItem (menu, slotIndex);
     }
     else
     {
@@ -547,6 +553,17 @@ void FxBusPanel::showSlotContextMenu (int slotIndex)
                 if (MidiLearnHooks::setSwitchType)
                     MidiLearnHooks::setSwitchType (
                         ChannelStripPanel::slotBypassParamId ("fx", slotIndex), result - 32);
+                break;
+
+            case 40:
+                if (MidiLearnHooks::setTunerSlot)
+                {
+                    const auto addr = tunerAddressFor (
+                        ChannelStripPanel::slotBypassParamId ("fx", slotIndex));
+                    const bool marked = MidiLearnHooks::getTunerSlot
+                                     && MidiLearnHooks::getTunerSlot() == addr;
+                    MidiLearnHooks::setTunerSlot (marked ? juce::String() : addr);
+                }
                 break;
 
             case 10:
@@ -699,4 +716,16 @@ void FxBusPanel::sliderValueChanged (juce::Slider* s)
         masterKnobLabel.setText (text, juce::dontSendNotification);
         if (onMasterFaderChanged) onMasterFaderChanged (db);
     }
+}
+
+void FxBusPanel::addTunerItem (juce::PopupMenu& menu, int slotIndex) const
+{
+    if (! MidiLearnHooks::setTunerSlot) return;
+
+    const auto addr = tunerAddressFor (ChannelStripPanel::slotBypassParamId ("fx", slotIndex));
+    const bool marked = MidiLearnHooks::getTunerSlot
+                     && MidiLearnHooks::getTunerSlot() == addr;
+
+    menu.addSeparator();
+    menu.addItem (40, "Use as Tuner", true, marked);
 }

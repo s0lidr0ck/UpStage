@@ -131,6 +131,14 @@ struct ProjectData
     ChannelState              inputChannelState;
     float                     inputDirectMix = 0.0f;
 
+    // Master output fader, in decibels. Range matches the master knob:
+    // -60 .. +12 dB, 0 = unity.
+    float                     masterFaderDb = 0.0f;
+
+    // Marked tuner slot, as "<strip>:<slot>" - "ch0".."ch3", "in" or "fx" -
+    // matching the MIDI slot-binding address scheme. Empty = none marked.
+    juce::String              tunerSlot;
+
     // Master insert chain state
     struct FxBusState
     {

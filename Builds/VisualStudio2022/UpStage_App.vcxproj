@@ -158,7 +158,6 @@
     <ClCompile Include="..\..\Source\SetlistPanel.cpp"/>
     <ClCompile Include="..\..\Source\SceneManager.cpp"/>
     <ClCompile Include="..\..\Source\TapTempo.cpp"/>
-    <ClCompile Include="..\..\Source\TunerPanel.cpp"/>
     <ClCompile Include="..\..\Source\LevelMeter.cpp"/>
     <ClCompile Include="..\..\Source\NoiseGate.cpp"/>
     <ClCompile Include="..\..\Source\MidiLearnManager.cpp"/>
@@ -3048,7 +3047,6 @@
     <ClInclude Include="..\..\Source\SetlistPanel.h"/>
     <ClInclude Include="..\..\Source\SceneManager.h"/>
     <ClInclude Include="..\..\Source\TapTempo.h"/>
-    <ClInclude Include="..\..\Source\TunerPanel.h"/>
     <ClInclude Include="..\..\Source\LevelMeter.h"/>
     <ClInclude Include="..\..\Source\NoiseGate.h"/>
     <ClInclude Include="..\..\Source\MidiLearnManager.h"/>

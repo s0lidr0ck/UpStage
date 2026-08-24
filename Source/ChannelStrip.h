@@ -77,8 +77,14 @@ public:
     /** Exchange the contents of two slots. Either may be empty. */
     void swapSlots (int slotA, int slotB);
 
-    /** Open the plugin's custom editor window. */
-    void openPluginEditor (int chainIndex);
+    /** Open the plugin's custom editor window (no-op for an empty slot). */
+    void openPluginEditor (int slot);
+
+    /** Close the plugin's editor window if it is open. Message thread only. */
+    void closePluginEditor (int slot);
+
+    /** True when that slot's editor window is currently open. */
+    bool isPluginEditorOpen (int slot) const;
 
     /** Bypass a plugin in the chain (audio still flows but plugin is skipped). */
     void setPluginBypassed (int chainIndex, bool bypassed);

@@ -39,6 +39,10 @@ public:
     /** Exchange the contents of two slots. Either may be empty. */
     void swapSlots (int slotA, int slotB);
     void openPluginEditor (int slot);
+    /** Close the plugin's editor window if open. Message thread only. */
+    void closePluginEditor (int slot);
+    /** True when that slot's editor window is currently open. */
+    bool isPluginEditorOpen (int slot) const;
     void setPluginBypassed (int slot, bool bypassed);
     bool isPluginBypassed  (int slot) const;
 

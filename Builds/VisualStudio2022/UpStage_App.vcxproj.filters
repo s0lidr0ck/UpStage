@@ -736,9 +736,6 @@
     <ClCompile Include="..\..\Source\TapTempo.cpp">
       <Filter>UpStage\Source</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Source\TunerPanel.cpp">
-      <Filter>UpStage\Source</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Source\LevelMeter.cpp">
       <Filter>UpStage\Source</Filter>
     </ClCompile>
@@ -3883,9 +3880,6 @@
       <Filter>UpStage\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TapTempo.h">
-      <Filter>UpStage\Source</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\TunerPanel.h">
       <Filter>UpStage\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\LevelMeter.h">

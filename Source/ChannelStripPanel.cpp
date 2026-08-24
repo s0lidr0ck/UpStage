@@ -1,6 +1,11 @@
 #include "ChannelStripPanel.h"
 #include "MidiLearnHooks.h"
 
+static juce::String tunerAddressFor (const juce::String& midiParamId)
+{
+    return midiParamId.fromFirstOccurrenceOf (":", false, false);
+}
+
 //==============================================================================
 ChannelStripPanel::ChannelStripPanel (ChannelStrip& s, const juce::String& id)
     : strip (s), stripId (id)
@@ -314,6 +319,7 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
         menu.addSeparator();
         menu.addItem (5, "Remove");
         addSlotMidiItems (menu, slotIndex);
+        addTunerItem (menu, slotIndex);
     }
     else
     {
@@ -434,6 +440,17 @@ void ChannelStripPanel::showSlotContextMenu (int slotIndex)
                                                    result - 32);
                 break;
 
+            case 40:
+                if (MidiLearnHooks::setTunerSlot)
+                {
+                    // Ticked already means "un-mark"; otherwise mark this slot.
+                    const auto addr = tunerAddressFor (slotBypassParamId (stripId, slotIndex));
+                    const bool marked = MidiLearnHooks::getTunerSlot
+                                     && MidiLearnHooks::getTunerSlot() == addr;
+                    MidiLearnHooks::setTunerSlot (marked ? juce::String() : addr);
+                }
+                break;
+
             case 13: case 14: case 15: case 16:
                 if (onAddInternalRow) onAddInternalRow (result - 13, slotIndex);
                 break;
@@ -542,4 +559,16 @@ void ChannelStripPanel::showNicknameDialog (int slotIndex)
             }
             delete aw;
         }), true);
+}
+
+void ChannelStripPanel::addTunerItem (juce::PopupMenu& menu, int slotIndex) const
+{
+    if (! MidiLearnHooks::setTunerSlot) return;
+
+    const auto addr = tunerAddressFor (slotBypassParamId (stripId, slotIndex));
+    const bool marked = MidiLearnHooks::getTunerSlot
+                     && MidiLearnHooks::getTunerSlot() == addr;
+
+    menu.addSeparator();
+    menu.addItem (40, "Use as Tuner", true, marked);
 }

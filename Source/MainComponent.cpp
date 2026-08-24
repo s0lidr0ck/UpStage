@@ -72,6 +72,17 @@ MainComponent::MainComponent() : menuBar (this)
     {
         return (int) midiLearnManager.getSwitchType (pid);
     };
+    MidiLearnHooks::getTunerSlot = [this] { return tunerSlot; };
+    MidiLearnHooks::setTunerSlot = [this] (const juce::String& addr)
+    {
+        // Marking a slot clears any previous mark - one tuner per project.
+        if (tunerSlot.isNotEmpty() && tunerSlot != addr)
+            setSlotBypassed (tunerSlotStrip(), tunerSlotIndex(), true);
+        tunerSlot = addr;
+        tunerActive = false;
+        tunerButton.setToggleState (false, juce::dontSendNotification);
+        projectDirty = true;
+    };
     MidiLearnHooks::setSwitchType = [this] (const juce::String& pid, int type)
     {
         midiLearnManager.setSwitchType (
@@ -641,17 +652,14 @@ MainComponent::MainComponent() : menuBar (this)
         }
     };
     fxBusPanel->onMasterFaderChanged = [this] (float db) {
+        masterFaderDb = db;
         masterOutputGain.store (juce::Decibels::decibelsToGain (db), std::memory_order_relaxed);
+        projectDirty = true;
     };
     addAndMakeVisible (*fxBusPanel);
 
 
     // Signal chain view removed - using mixer-style layout instead
-
-    // Tuner - initially hidden
-    tunerPanel.tunerActive = false;
-    addAndMakeVisible (tunerPanel);
-    tunerPanel.setVisible (false);
 
     // MIDI activity LED
     midiLedLabel.setText ("MIDI", juce::dontSendNotification);
@@ -1020,7 +1028,6 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     }
 
     // ---- Tuner gets trimmed input ----
-    tunerPanel.pushAudioData (work.getReadPointer (0), info.numSamples);
 
     // ---- Noise gate ----
     noiseGate.processBlock (work);
@@ -1105,7 +1112,6 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     // ---- Channel processing ---- (channelOutputs/masterMix are members)
     masterMix.clear();
 
-    if (! outputMuted)
     {
         bool anySoloed = false;
         for (int i = 0; i < NUM_CHANNELS; ++i)
@@ -1179,10 +1185,6 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         for (int ch = 0; ch < 2; ++ch)
             work.copyFrom (ch, 0, masterMix, ch, 0, info.numSamples);
     }
-    else
-    {
-        work.clear();
-    }
 
     // ---- Master input level (before FX bus) ----
     masterLevelInL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
@@ -1255,7 +1257,12 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
         int windowSamples = (int)(currentSampleRate * 0.4);
         if (lufsSampleCount >= windowSamples)
         {
-            float meanSq = lufsAccumulator / (float)(lufsSampleCount * 2);
+            // BS.1770 sums the per-channel mean squares (gain 1.0 for L and R),
+            // it does not average them. lufsAccumulator already holds
+            // sum(l^2 + r^2) over lufsSampleCount frames, so dividing by the
+            // frame count gives that sum directly. Dividing by 2*frames - the
+            // average - halved the power and read 3.01 dB low.
+            float meanSq = lufsAccumulator / (float) lufsSampleCount;
             float lufs = -0.691f + 10.0f * std::log10 (juce::jmax (1e-10f, meanSq));
             masterLufsDb.store (lufs, std::memory_order_relaxed);
             lufsAccumulator = 0.0f;
@@ -2319,13 +2326,6 @@ void MainComponent::resized()
     statusStateLabel.setBounds (statusArea.removeFromRight (200).reduced (4, 2));
     statusLabel.setBounds (statusArea.reduced (8, 2));
 
-    // Tuner overlay (covers main area)
-    if (tunerPanel.isVisible())
-    {
-        tunerPanel.setBounds (area.reduced (20));
-        return;
-    }
-
     // MIXER-STYLE CHANNEL STRIPS - equal width: INPUT + 4 channels + MASTER
     const int totalChannels = NUM_CHANNELS + 2; // +1 for input, +1 for master
     const int stripWidth = area.getWidth() / totalChannels;
@@ -2581,12 +2581,7 @@ void MainComponent::buttonClicked (juce::Button* b)
     // Tuner
     else if (b == &tunerButton)
     {
-        bool showing = tunerPanel.isVisible();
-        tunerPanel.tunerActive = ! showing;
-        outputMuted = ! showing;
-        tunerPanel.setVisible (! showing);
-        tunerButton.setToggleState (! showing, juce::dontSendNotification);  // lit while active
-        resized();
+        toggleTuner();
     }
 
     // Panic
@@ -2981,6 +2976,81 @@ bool MainComponent::isSlotBypassed (const juce::String& stripId, int slotIndex)
     return strip->isPluginBypassed (slotIndex);
 }
 
+juce::String MainComponent::tunerSlotStrip() const
+{
+    return tunerSlot.upToLastOccurrenceOf (":", false, false);
+}
+
+int MainComponent::tunerSlotIndex() const
+{
+    return tunerSlot.fromLastOccurrenceOf (":", false, false).getIntValue();
+}
+
+void MainComponent::toggleTuner()
+{
+    if (tunerSlot.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::AlertWindow::InfoIcon, "No Tuner Set",
+            "Right-click the plugin you want to use as a tuner and choose "
+            "\"Use as Tuner\".", "OK");
+        return;
+    }
+
+    const auto strip = tunerSlotStrip();
+    const int  slot  = tunerSlotIndex();
+
+    if (! slotHasPlugin (strip, slot))
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::AlertWindow::InfoIcon, "Tuner Slot Empty",
+            "The slot marked as the tuner has no plugin in it any more.\n\n"
+            "Right-click a plugin and choose \"Use as Tuner\".", "OK");
+        return;
+    }
+
+    tunerActive = ! tunerActive;
+
+    // Enabled = un-bypassed. Audio keeps flowing either way; the tuner just
+    // stops costing anything when it is off.
+    setSlotBypassed (strip, slot, ! tunerActive);
+
+    if (tunerActive) openPluginEditorFor  (strip, slot);
+    else             closePluginEditorFor (strip, slot);
+
+    tunerButton.setToggleState (tunerActive, juce::dontSendNotification);
+}
+
+bool MainComponent::slotHasPlugin (const juce::String& stripId, int slotIndex)
+{
+    if (stripId == "fx")
+        return ! fxBus->isSlotEmpty (slotIndex);
+
+    ChannelStrip*      strip = nullptr;
+    ChannelStripPanel* panel = nullptr;
+    return resolveSlot (stripId, slotIndex, strip, panel);
+}
+
+void MainComponent::openPluginEditorFor (const juce::String& stripId, int slotIndex)
+{
+    if (stripId == "fx") { fxBus->openPluginEditor (slotIndex); return; }
+
+    ChannelStrip*      strip = nullptr;
+    ChannelStripPanel* panel = nullptr;
+    if (resolveSlot (stripId, slotIndex, strip, panel))
+        strip->openPluginEditor (slotIndex);
+}
+
+void MainComponent::closePluginEditorFor (const juce::String& stripId, int slotIndex)
+{
+    if (stripId == "fx") { fxBus->closePluginEditor (slotIndex); return; }
+
+    ChannelStrip*      strip = nullptr;
+    ChannelStripPanel* panel = nullptr;
+    if (resolveSlot (stripId, slotIndex, strip, panel))
+        strip->closePluginEditor (slotIndex);
+}
+
 void MainComponent::doTap()
 {
     const double bpm = tapTempo.tap();
@@ -3057,6 +3127,7 @@ void MainComponent::midiLearnParameterChanged (const juce::String& paramID, floa
     else if (paramID == "masterFader")
     {
         const float db = juce::jmap (value, 0.0f, 1.0f, -60.0f, 12.0f);
+        masterFaderDb = db;
         masterOutputGain.store (juce::Decibels::decibelsToGain (db), std::memory_order_relaxed);
         if (fxBusPanel) fxBusPanel->setMasterFaderDb (db);
     }
@@ -3344,6 +3415,16 @@ void MainComponent::loadProjectData (const ProjectData& data)
     midiTranslator.setRules (data.midiRules);
     tapTempo.setBPM (data.tapTempoBPM);
 
+    // Master output fader + marked tuner slot.
+    masterFaderDb = data.masterFaderDb;
+    masterOutputGain.store (juce::Decibels::decibelsToGain (masterFaderDb),
+                            std::memory_order_relaxed);
+    if (fxBusPanel) fxBusPanel->setMasterFaderDb (masterFaderDb);
+
+    tunerSlot   = data.tunerSlot;
+    tunerActive = false;
+    tunerButton.setToggleState (false, juce::dontSendNotification);
+
     // Restore MIDI devices from project
     if (data.midiInputDevice.isNotEmpty())
     {
@@ -3420,6 +3501,9 @@ void MainComponent::loadProjectData (const ProjectData& data)
     inputChannel->setOutputGain (data.inputChannelState.outputGain);
     inputDirectLevel.store (data.inputDirectMix, std::memory_order_relaxed);
     inputDirectKnob.setValue (data.inputDirectMix, juce::dontSendNotification);
+    inputStripFader.setValue (
+        juce::Decibels::gainToDecibels (data.inputChannelState.outputGain),
+        juce::dontSendNotification);
 
     {
         FxBus::State fbs;
@@ -3679,6 +3763,8 @@ ProjectData MainComponent::collectProjectData() const
     data.useLoopFile     = (inputRouter.getMode() == InputRouter::Mode::Loop);
     data.loopFilePath    = inputRouter.getLoopFileName();
     data.tapTempoBPM     = tapTempo.getBPM();
+    data.masterFaderDb   = masterFaderDb;
+    data.tunerSlot       = tunerSlot;
     data.gateEnabled     = noiseGate.enabled;
     data.gateThreshDb    = noiseGate.thresholdDb;
     data.gateAttackMs    = noiseGate.attackMs;
@@ -4634,9 +4720,9 @@ void MainComponent::updateStatusBar()
         stateStr << "[REC]  ";
         stateColour = juce::Colour (0xffff4444);
     }
-    if (tunerPanel.isVisible())
+    if (tunerActive)
     {
-        stateStr << "[TUNER/MUTED]  ";
+        stateStr << "[TUNER]  ";
         stateColour = juce::Colour (0xffff6644);
     }
 

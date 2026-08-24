@@ -51,10 +51,6 @@
       <FILE id="TapTempoH" name="TapTempo.h" compile="0" resource="0" file="Source/TapTempo.h"/>
       <FILE id="TapTempoCpp" name="TapTempo.cpp" compile="1" resource="0"
             file="Source/TapTempo.cpp"/>
-      <FILE id="TunerPanelH" name="TunerPanel.h" compile="0" resource="0"
-            file="Source/TunerPanel.h"/>
-      <FILE id="TunerPanelCpp" name="TunerPanel.cpp" compile="1" resource="0"
-            file="Source/TunerPanel.cpp"/>
       <FILE id="LevelMeterH" name="LevelMeter.h" compile="0" resource="0"
             file="Source/LevelMeter.h"/>
       <FILE id="LevelMeterCpp" name="LevelMeter.cpp" compile="1" resource="0"

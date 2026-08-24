@@ -90,6 +90,7 @@ private:
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
     void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
+    void addTunerItem (juce::PopupMenu& menu, int slotIndex) const;
     void showNicknameDialog (int slotIndex);
 
     int  dragSourceSlot = -1;

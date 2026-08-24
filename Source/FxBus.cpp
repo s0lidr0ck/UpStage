@@ -185,6 +185,28 @@ void FxBus::swapSlots (int slotA, int slotB)
     pluginChain.set (slotB, a);
 }
 
+void FxBus::closePluginEditor (int slot)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    PluginEntry* entry = nullptr;
+    {
+        juce::ScopedLock sl (chainLock);
+        entry = pluginChain[slot];
+    }
+    if (entry == nullptr) return;
+
+    if (entry->editorWindow != nullptr)
+        delete entry->editorWindow.getComponent();
+}
+
+bool FxBus::isPluginEditorOpen (int slot) const
+{
+    juce::ScopedLock sl (chainLock);
+    auto* entry = pluginChain[slot];
+    return entry != nullptr && entry->editorWindow != nullptr;
+}
+
 void FxBus::openPluginEditor (int index)
 {
     // Message thread only — touches the GUI and the per-entry editorWindow.
@@ -196,6 +218,7 @@ void FxBus::openPluginEditor (int index)
         if (! juce::isPositiveAndBelow (index, pluginChain.size())) return;
         entry = pluginChain[index];
     }
+    if (entry == nullptr) return;   // empty slot
 
     auto* proc = entry->processor.get();
     if (proc == nullptr || ! proc->hasEditor()) return;

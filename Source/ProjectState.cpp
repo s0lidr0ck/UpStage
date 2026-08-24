@@ -72,6 +72,12 @@ bool ProjectState::saveToFile (const juce::File& file, const ProjectData& data,
     // ---- FX Bus ----
     root->addChildElement (fxBusStateToXml (data.fxBusState));
 
+    {
+        auto* masterEl = root->createNewChildElement ("Master");
+        masterEl->setAttribute ("faderDb",   data.masterFaderDb);
+        masterEl->setAttribute ("tunerSlot", data.tunerSlot);
+    }
+
     // ---- Setlist ----
     if (data.setlistFilePath.isNotEmpty())
         root->setAttribute ("setlistFilePath", data.setlistFilePath);
@@ -189,6 +195,12 @@ bool ProjectState::loadFromFile (const juce::File& file, ProjectData& data,
     }
 
     // ---- FX Bus ----
+    if (auto* masterEl = root->getChildByName ("Master"))
+    {
+        data.masterFaderDb = (float) masterEl->getDoubleAttribute ("faderDb", 0.0);
+        data.tunerSlot     = masterEl->getStringAttribute ("tunerSlot");
+    }
+
     if (auto* fxEl = root->getChildByName ("FxBus"))
         xmlToFxBusState (fxEl, data.fxBusState);
 

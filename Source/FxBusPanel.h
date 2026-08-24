@@ -83,6 +83,7 @@ private:
     int getSlotAt (int y) const;
     void showSlotContextMenu (int slotIndex);
     void addSlotMidiItems (juce::PopupMenu& menu, int slotIndex) const;
+    void addTunerItem (juce::PopupMenu& menu, int slotIndex) const;
 
     // Drag-to-swap, matching ChannelStripPanel.
     int  dragSourceSlot = -1;

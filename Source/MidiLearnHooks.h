@@ -33,4 +33,9 @@ struct MidiLearnHooks
         Cannot be auto-detected between 0 and 1 - those streams are identical. */
     static inline std::function<int (const juce::String& paramID)> getSwitchType;
     static inline std::function<void (const juce::String& paramID, int type)> setSwitchType;
+
+    /** The slot marked as the tuner, as "<strip>:<slot>", or empty when none
+        is marked. Marking a slot clears any previous mark - one per project. */
+    static inline std::function<juce::String ()> getTunerSlot;
+    static inline std::function<void (const juce::String& slotAddress)> setTunerSlot;
 };

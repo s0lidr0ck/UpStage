@@ -11,7 +11,6 @@
 #include "SetlistPanel.h"
 #include "SceneManager.h"
 #include "TapTempo.h"
-#include "TunerPanel.h"
 #include "LevelMeter.h"
 #include "NoiseGate.h"
 #include "MidiLearnManager.h"
@@ -153,7 +152,26 @@ private:
     double currentSampleRate = 44100.0;
     int    currentBlockSize  = 256;
     bool   projectDirty      = false;
-    bool   outputMuted       = false;  // true while tuner is active
+    //==========================================================================
+    // Tuner: any plugin slot can be marked as the tuner, addressed the same way
+    // MIDI slot bindings are ("<strip>:<slot>"). The TUNER button un-bypasses
+    // it and opens its editor; pressing again closes and re-bypasses. Audio
+    // keeps flowing throughout. Empty = no tuner marked. Saved per project.
+    juce::String tunerSlot;
+    bool         tunerActive = false;
+
+    juce::String tunerSlotStrip() const;
+    int          tunerSlotIndex() const;
+    void         toggleTuner();
+
+    bool slotHasPlugin        (const juce::String& stripId, int slotIndex);
+    void openPluginEditorFor  (const juce::String& stripId, int slotIndex);
+    void closePluginEditorFor (const juce::String& stripId, int slotIndex);
+
+    /** Master output fader position in dB, mirrored into masterOutputGain.
+        Kept as a member so it can be saved - the gain itself is a raw
+        multiplier and the knob is owned by FxBusPanel. */
+    float  masterFaderDb = 0.0f;
     int    autosaveCounter   = 0;
     std::atomic<float> masterOutputGain { 1.0f };
     std::atomic<bool>  midiActivityFlag { false };
@@ -353,7 +371,6 @@ private:
     std::unique_ptr<FxBusPanel>       fxBusPanel;
 
     // Tuner panel (hidden until activated)
-    TunerPanel tunerPanel;
 
     // Hardware module windows opened from toolbar icons
     std::unique_ptr<CassetteDeckWindow> cassetteDeckWindow;

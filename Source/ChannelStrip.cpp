@@ -242,7 +242,31 @@ void ChannelStrip::swapSlots (int slotA, int slotB)
     pluginChain.set (slotB, a);
 }
 
-void ChannelStrip::openPluginEditor (int chainIndex)
+void ChannelStrip::closePluginEditor (int slot)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    PluginEntry* entry = nullptr;
+    {
+        juce::ScopedLock sl (chainLock);
+        entry = pluginChain[slot];
+    }
+    if (entry == nullptr) return;
+
+    // The window deletes itself on close and its SafePointer auto-nulls, so
+    // deleting it here leaves the entry consistent either way.
+    if (entry->editorWindow != nullptr)
+        delete entry->editorWindow.getComponent();
+}
+
+bool ChannelStrip::isPluginEditorOpen (int slot) const
+{
+    juce::ScopedLock sl (chainLock);
+    auto* entry = pluginChain[slot];
+    return entry != nullptr && entry->editorWindow != nullptr;
+}
+
+void ChannelStrip::openPluginEditor (int slot)
 {
     // Must run on the message thread — it touches the GUI and the per-entry
     // editorWindow pointer, which only the message thread owns.
@@ -253,9 +277,10 @@ void ChannelStrip::openPluginEditor (int chainIndex)
     PluginEntry* entry = nullptr;
     {
         juce::ScopedLock sl (chainLock);
-        if (! juce::isPositiveAndBelow (chainIndex, pluginChain.size())) return;
-        entry = pluginChain[chainIndex];
+        if (! juce::isPositiveAndBelow (slot, pluginChain.size())) return;
+        entry = pluginChain[slot];
     }
+    if (entry == nullptr) return;   // empty slot
 
     auto* proc = entry->processor.get();
     if (proc == nullptr || ! proc->hasEditor()) return;
