@@ -452,10 +452,18 @@ private:
         MenuNew = 1, MenuOpen, MenuSave, MenuSaveAs,
         MenuPluginManager, MenuAsioSettings, MenuSetlist, MenuMidiRules, MenuQuit,
         MenuLoadLoop, MenuLoopMode, MenuLiveMode, MenuEditUIColors,
+        MenuImportMidiMap,
         MenuRecentBase = 1000,  // IDs 1000-1009 for recent projects
         MenuMidiInBase = 2000,  // IDs 2000+ for MIDI input devices
         MenuMidiOutBase = 3000  // IDs 3000+ for MIDI output devices
     };
+
+    /** Replace this project's MIDI learn bindings and translator rules with
+        the ones stored in another .upstage file. Everything else in that file
+        is ignored - channels, plugins, scenes and device selection are left
+        alone. Imports into the session only; it sticks when the project is
+        saved. */
+    void importMidiMapFromProject();
 
     void showPluginManager();
     void showShortcutHelp();

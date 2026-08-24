@@ -3145,6 +3145,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int idx, const juce::String&)
         m.addItem (MenuPluginManager, "Plugin Manager...");
         m.addItem (MenuAsioSettings,  "ASIO Device Settings...");
         m.addItem (MenuMidiRules,     "MIDI Rules...");
+        m.addItem (MenuImportMidiMap,  "Import MIDI Map from Project...");
         m.addSeparator();
 
         // MIDI Input submenu (toggle each device on/off)
@@ -3190,6 +3191,7 @@ void MainComponent::menuItemSelected (int id, int)
         case MenuPluginManager: showPluginManager(); break;
         case MenuAsioSettings: openAsioSettings(); break;
         case MenuMidiRules:   showMidiRulesEditor(); break;
+        case MenuImportMidiMap: importMidiMapFromProject(); break;
         case MenuSetlist:      showSetlistPanel(); break;
         case MenuEditUIColors:
             uiEditMode = !uiEditMode;
@@ -4177,6 +4179,87 @@ void MainComponent::showAddPluginMenuForFxBus (int slot)
     opts.resizable                = true;
     opts.escapeKeyTriggersCloseButton = true;
     opts.launchAsync();
+}
+
+void MainComponent::importMidiMapFromProject()
+{
+    // The MIDI Rules editor holds its own copy of the rules and writes them
+    // back when it closes, which would silently undo whatever we import.
+    if (activeMidiRulesPanel != nullptr)
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::AlertWindow::InfoIcon, "Import MIDI Map",
+            "Close the MIDI Rules window first - it would overwrite the "
+            "imported rules when it closes.", "OK");
+        return;
+    }
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Import MIDI Map From Project",
+        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+        "*.upstage");
+
+    chooser->launchAsync (juce::FileBrowserComponent::openMode
+                        | juce::FileBrowserComponent::canSelectFiles,
+        [this, chooser] (const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (! file.existsAsFile()) return;
+
+            const int haveBindings = midiLearnManager.getBindings().size();
+            const int haveRules    = midiTranslator.getRules().size();
+
+            auto doImport = [this, file] ()
+            {
+                // A throwaway ProjectData: loadFromFile only writes into the
+                // objects handed to it, so passing nullptr for the scenes and
+                // discarding `tmp` leaves channels, plugins, scenes and device
+                // selection untouched. loadFromXml on the learn manager clears
+                // and rebuilds, which is the replace-everything behaviour, and
+                // migrates pre-switchType bindings on the way in.
+                ProjectData tmp;
+                if (! projectState.loadFromFile (file, tmp, nullptr, &midiLearnManager))
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon, "Import MIDI Map",
+                        "Could not read " + file.getFileName() + ".", "OK");
+                    return;
+                }
+
+                midiTranslator.setRules (tmp.midiRules);
+
+                const int gotBindings = midiLearnManager.getBindings().size();
+                const int gotRules    = tmp.midiRules.size();
+
+                projectDirty = true;
+                repaint();                       // MIDI-learn badges
+
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::InfoIcon, "Import MIDI Map",
+                    "Imported " + juce::String (gotBindings) + " binding(s) and "
+                        + juce::String (gotRules) + " rule(s) from "
+                        + file.getFileNameWithoutExtension() + ".\n\n"
+                        "Save the project to keep them.", "OK");
+            };
+
+            // Only confirm when there is something to lose.
+            if (haveBindings == 0 && haveRules == 0)
+            {
+                doImport();
+                return;
+            }
+
+            juce::AlertWindow::showOkCancelBox (
+                juce::AlertWindow::WarningIcon, "Import MIDI Map",
+                "Replace " + juce::String (haveBindings) + " MIDI binding(s) and "
+                    + juce::String (haveRules) + " rule(s) with the map from "
+                    + file.getFileNameWithoutExtension() + "?",
+                "Replace", "Cancel", nullptr,
+                juce::ModalCallbackFunction::create ([doImport] (int result)
+                {
+                    if (result == 1) doImport();
+                }));
+        });
 }
 
 void MainComponent::showPluginManager()
