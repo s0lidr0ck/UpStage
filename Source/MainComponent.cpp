@@ -1007,6 +1007,22 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     // counter is a bare register read: no allocation, no lock, RT-safe.
     const juce::int64 blockStartTicks = juce::Time::getHighResolutionTicks();
 
+    // How long since the driver last called us? Should be the block period,
+    // near enough. A big gap means the driver did not deliver on time, which
+    // is a dropout no amount of speed on our side would prevent.
+    if (lastCallbackTicks != 0 && currentSampleRate > 0.0 && info.numSamples > 0)
+    {
+        const double perTick = 1.0e6 / (double) juce::Time::getHighResolutionTicksPerSecond();
+        AudioHealth::noteCallbackGap (
+            (int) ((double) (blockStartTicks - lastCallbackTicks) * perTick),
+            (int) (1.0e6 * (double) info.numSamples / currentSampleRate));
+    }
+    lastCallbackTicks = blockStartTicks;
+
+    // Accumulated ticks spent inside plugin processBlock calls, so the readout
+    // can separate "your plugins are heavy" from "our own DSP is heavy".
+    juce::int64 pluginTicks = 0;
+
     auto* buffer = info.buffer;
 
     // Guard against an over-large or zero block (e.g. device reconfig). The
@@ -1065,7 +1081,11 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
 
     // ---- Input channel pre-FX ----
     rtInputMidi.clear();        // Input channel gets MIDI too
-    inputChannel->processBlock (work, rtInputMidi);
+    {
+        const auto t0 = juce::Time::getHighResolutionTicks();
+        inputChannel->processBlock (work, rtInputMidi);
+        pluginTicks += juce::Time::getHighResolutionTicks() - t0;
+    }
 
     // ---- Measure output level (after FX) ----
     inputLevelOutL.store (work.getMagnitude (0, 0, info.numSamples), std::memory_order_relaxed);
@@ -1209,7 +1229,11 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
                 rtChannelMidi.addEvents (midi, 0, -1, 0);
 
                 if (shouldProcess)
+                {
+                    const auto t0 = juce::Time::getHighResolutionTicks();
                     channels[i]->processBlock (channelOutputs[i], rtChannelMidi);
+                    pluginTicks += juce::Time::getHighResolutionTicks() - t0;
+                }
                 // else: suspended - no processing at all. This is the CPU saving.
             }
 
@@ -1267,7 +1291,9 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     {
         rtFxMidi.clear();
         rtFxMidi.addEvents (midi, 0, -1, 0);
+        const auto t0 = juce::Time::getHighResolutionTicks();
         fxBus->processBlock (work, info.numSamples, rtFxMidi);
+        pluginTicks += juce::Time::getHighResolutionTicks() - t0;
     }
 
     // ---- Channel level meters ----
@@ -1351,11 +1377,14 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     // ---- Did we make the deadline? ----
     if (currentSampleRate > 0.0)
     {
-        const double elapsedSec = (double) (juce::Time::getHighResolutionTicks() - blockStartTicks)
-                                / (double) juce::Time::getHighResolutionTicksPerSecond();
-        const double budgetSec  = (double) info.numSamples / currentSampleRate;
+        const double perTick   = 1.0e6 / (double) juce::Time::getHighResolutionTicksPerSecond();
+        const double elapsedUs = (double) (juce::Time::getHighResolutionTicks() - blockStartTicks) * perTick;
+        const double pluginUs  = (double) pluginTicks * perTick;
+        const double budgetUs  = 1.0e6 * (double) info.numSamples / currentSampleRate;
 
-        if (elapsedSec > budgetSec)
+        AudioHealth::noteBlockTime ((int) elapsedUs, (int) pluginUs, (int) budgetUs);
+
+        if (elapsedUs > budgetUs)
             AudioHealth::noteOverrun();
     }
 }
@@ -2410,7 +2439,7 @@ void MainComponent::resized()
     // Footer status bar
     auto statusArea = area.removeFromBottom (22);
     ramLabel.setBounds (statusArea.removeFromRight (90).reduced (4, 2));
-    cpuLabel.setBounds (statusArea.removeFromRight (360).reduced (4, 2));  // CPU + peak + xrun + ovr + lock
+    cpuLabel.setBounds (statusArea.removeFromRight (420).reduced (4, 2));  // CPU + block/plugin times + ovr + lock
     statusStateLabel.setBounds (statusArea.removeFromRight (200).reduced (4, 2));
     statusLabel.setBounds (statusArea.reduced (8, 2));
 
@@ -2981,19 +3010,28 @@ void MainComponent::timerCallback()
     if (++perfCounter >= 15)
     {
         perfCounter = 0;
+        // NOTE: JUCE's getCpuUsage() is a low-pass filtered average AND is
+        // clamped to 100%, so it can never show an overrun and its "peak" is
+        // the peak of a smoothed value. Kept for familiarity, but the real
+        // numbers are the measured block times below.
         double cpuUsage = deviceManager.getCpuUsage() * 100.0;
-
-        // The average hides the spikes that actually cause dropouts, so show
-        // the peak seen since the last update alongside it, then reset.
-        const double shownPeak = juce::jmax (peakCpuUsage, cpuUsage);
         peakCpuUsage = 0.0;
+
+        int blkUs = 0, plgUs = 0, budUs = 0;
+        AudioHealth::takePeaks (blkUs, plgUs, budUs);
+
+        juce::String worstName; int worstUs = 0;
+        AudioHealth::takeWorstPlugin (worstName, worstUs);
+
+        int gapUs = 0, lateCount = 0;
+        AudioHealth::takeGap (gapUs, lateCount);
 
         // XRun count is the driver's own tally of dropped buffers - ground
         // truth, rather than inferring underruns from CPU load. -1 means the
         // driver doesn't report it.
         // Always show something: "no XRUN field" would be indistinguishable
         // from "zero XRuns", and that distinction is the whole point here.
-        juce::String xrunText = "  XRUN: n/a";
+        juce::String xrunText;   // omitted entirely when the driver can't report
         if (auto* dev = deviceManager.getCurrentAudioDevice())
         {
             const int x = dev->getXRunCount();
@@ -3013,15 +3051,24 @@ void MainComponent::timerCallback()
         const int overruns   = AudioHealth::getOverruns();
         const int lockMisses = AudioHealth::getLockMisses();
 
-        cpuLabel.setText ("CPU: " + juce::String (cpuUsage, 1) + "%"
-                          + "  PK: " + juce::String (shownPeak, 1) + "%"
+        // BLK = worst whole-callback time vs the budget for one block.
+        // PLG = worst time inside plugins. BLK-PLG is everything we do
+        //       ourselves: mixing, metering, LUFS, goniometer.
+        cpuLabel.setText ("CPU: " + juce::String (cpuUsage, 0) + "%"
+                          + "  BLK: " + juce::String (blkUs / 1000.0, 1)
+                          + "/" + juce::String (budUs / 1000.0, 1) + "ms"
+                          + "  PLG: " + juce::String (plgUs / 1000.0, 1) + "ms"
                           + xrunText
                           + "  OVR: " + juce::String (overruns)
-                          + "  LOCK: " + juce::String (lockMisses),
+                          + "  GAP: " + juce::String (gapUs / 1000.0, 1) + "ms"
+                          + "/" + juce::String (lateCount)
+                          + (worstUs > 0 ? "  WORST: " + worstName.substring (0, 14)
+                                           + " " + juce::String (worstUs / 1000.0, 1) + "ms"
+                                         : juce::String()),
                           juce::dontSendNotification);
         cpuLabel.setColour (juce::Label::textColourId,
             (xrunsSinceStart > 0 || overruns > 0 || lockMisses > 0) ? juce::Colour (0xffcc4444)
-            : shownPeak > 50.0 ? juce::Colour (0xffccaa44)
+            : (budUs > 0 && blkUs > budUs / 2) ? juce::Colour (0xffccaa44)
             : juce::Colour (0xff88aa88));
 
         PROCESS_MEMORY_COUNTERS pmc;
@@ -4496,6 +4543,16 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainComponent::checkAudioDeviceHealth()
 {
+    // ---- TEMPORARILY DISABLED (bisecting an audio regression) ----
+    // restartLastAudioDevice() stops and restarts the device, which makes
+    // AudioDeviceManager broadcast a change, which lands back here via
+    // changeListenerCallback - and mid-restart isPlaying() is false, so the
+    // device still looks unhealthy and we restart it again. A self-sustaining
+    // loop, each iteration an audible glitch, and completely invisible to the
+    // block-time counters because the callback itself stays fast.
+    return;
+    // ---------------------------------------------------------------
+
     auto* dev = deviceManager.getCurrentAudioDevice();
     const bool healthy = (dev != nullptr && dev->isOpen() && dev->isPlaying());
 

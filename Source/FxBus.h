@@ -97,6 +97,9 @@ private:
         juce::String identifier;
         bool         bypassed = false;
 
+        /** Cached at load - getName() is not audio-thread safe. */
+        juce::String cachedName;
+
         // Per-slot appearance (see ChannelStrip::PluginEntry). Message thread.
         juce::Colour tint { 0x00000000 };
         juce::String nickname;
@@ -112,6 +115,13 @@ private:
 
     juce::Array<PluginEntry*> pluginChain;
     mutable juce::CriticalSection chainLock;
+
+    /** Audio-thread scratch, sized in prepare(). These were locals allocated
+        per plugin per block; see processBlock. */
+    juce::MidiBuffer         rtPluginMidi;
+    juce::AudioBuffer<float> rtPadded;
+    static constexpr int     kMaxPluginChannels = 8;
+
 
     /** Close any open editor window, then delete the entry (and its plugin).
         Call on the message thread with the entry already removed from

@@ -433,6 +433,10 @@ private:
     // count comes from the device itself, so it is the ground truth for "did we
     // actually underrun" rather than an inference from CPU load.
 
+    /** Tick count at the previous audio callback, for measuring delivery gaps.
+        Audio thread only. */
+    juce::int64 lastCallbackTicks = 0;
+
     /** Highest CPU reading seen in the current display window. */
     double peakCpuUsage = 0.0;
     /** Device XRun count when we started watching, so we can show a delta. */

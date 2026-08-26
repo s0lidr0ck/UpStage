@@ -106,6 +106,10 @@ public:
         juce::String identifier;
         bool         bypassed = false;
 
+        /** Plugin name, cached at load. getName() on a live plugin can be
+            surprisingly slow and is not safe to call from the audio thread. */
+        juce::String cachedName;
+
         // Per-slot appearance: stored on the entry so two instances of the
         // same plugin keep separate nicknames/tints, and reorder/remove carry
         // them automatically. Message thread only.
@@ -180,6 +184,13 @@ private:
         Never resized after construction, so a slot index is stable. */
     juce::Array<PluginEntry*> pluginChain;
     juce::CriticalSection     chainLock;
+
+    /** Audio-thread scratch, sized in prepare(). These were locals allocated
+        per plugin per block; see processBlock. */
+    juce::MidiBuffer         rtPluginMidi;
+    juce::AudioBuffer<float> rtPadded;
+    static constexpr int     kMaxPluginChannels = 8;
+
 
     /** Install `entry` into `slot` (-1 = first free) and fire the callback.
         Takes ownership; deletes the entry and reports false when there is no

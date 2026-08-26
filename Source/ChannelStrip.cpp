@@ -54,6 +54,10 @@ void ChannelStrip::prepare (double sampleRate, int blockSize)
     currentSampleRate = sampleRate;
     currentBlockSize  = blockSize;
 
+    // Audio-thread scratch, generously sized so processBlock never allocates.
+    rtPadded.setSize (kMaxPluginChannels, blockSize, false, true, false);
+    rtPluginMidi.ensureSize (2048);
+
     inputGainSmoothed.reset (sampleRate, 0.03);  // 30ms ramp
     outputGainSmoothed.reset (sampleRate, 0.03);
     inputGainSmoothed.setCurrentAndTargetValue (inputGainTarget.load());
@@ -163,6 +167,7 @@ bool ChannelStrip::addPlugin (const juce::PluginDescription& desc,
             auto* entry = new PluginEntry();
             entry->processor  = std::move (instance);
             entry->identifier = desc.createIdentifierString();
+            entry->cachedName = entry->processor->getName();
             entry->bypassed   = false;
 
             placeEntry (entry, slot, callback);
@@ -203,6 +208,7 @@ void ChannelStrip::addInternalRow (int kind, int slot, std::function<void(bool)>
         entry->processor  = std::move (proc);
         entry->identifier = identifier;
         entry->bypassed   = false;
+        entry->cachedName = entry->processor->getName();
 
         placeEntry (entry, slot, callback);
     });
@@ -413,22 +419,38 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
                 if (entry->processor == nullptr) continue;
                 if (entry->bypassed)             continue;
 
-                juce::MidiBuffer pluginMidi (midi);
-                auto expected = entry->processor->getTotalNumInputChannels();
+                // Both of these used to be locals - a MidiBuffer copy and, for
+                // any plugin wanting more channels than we hand it, a whole
+                // AudioBuffer - allocated PER PLUGIN, PER BLOCK on the audio
+                // thread. malloc is usually nanoseconds but occasionally takes
+                // milliseconds, which showed up as an intermittent pop with a
+                // perfectly healthy average CPU. Members now: clear() and
+                // setSize(avoidReallocating) both keep their capacity.
+                rtPluginMidi.clear();
+                rtPluginMidi.addEvents (midi, 0, -1, 0);
+
+                const auto expected = entry->processor->getTotalNumInputChannels();
+                const auto tStart = juce::Time::getHighResolutionTicks();
+
                 if (expected > buffer.getNumChannels())
                 {
-                    juce::AudioBuffer<float> padded (expected, buffer.getNumSamples());
-                    padded.clear();
+                    rtPadded.setSize (expected, buffer.getNumSamples(), false, false, true);
+                    rtPadded.clear();
                     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                        padded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
-                    entry->processor->processBlock (padded, pluginMidi);
+                        rtPadded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+                    entry->processor->processBlock (rtPadded, rtPluginMidi);
                     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                        buffer.copyFrom (ch, 0, padded, ch, 0, buffer.getNumSamples());
+                        buffer.copyFrom (ch, 0, rtPadded, ch, 0, buffer.getNumSamples());
                 }
                 else
                 {
-                    entry->processor->processBlock (buffer, pluginMidi);
+                    entry->processor->processBlock (buffer, rtPluginMidi);
                 }
+
+                AudioHealth::notePlugin (
+                    entry->cachedName.toRawUTF8(),
+                    (int) ((double) (juce::Time::getHighResolutionTicks() - tStart)
+                           * 1.0e6 / (double) juce::Time::getHighResolutionTicksPerSecond()));
             }
         }
     }

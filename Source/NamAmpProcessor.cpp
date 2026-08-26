@@ -1,4 +1,5 @@
 #include "NamAmpProcessor.h"
+#include "AudioHealth.h"
 #include "NamAmpEditor.h"
 
 #include "NAM/dsp.h"
@@ -309,17 +310,28 @@ void NamAmpProcessor::renderSide (Side& s, juce::AudioBuffer<float>& out, float 
     if (trimDb != 0.0f)
         out.applyGain (0, n, juce::Decibels::decibelsToGain (trimDb));
 
+    // Split timing: the model and the cab convolution are the two candidates
+    // inside this row and they need completely different fixes. Reported through
+    // the existing WORST readout, so whichever dominates gets named.
+    const double perTick = 1.0e6 / (double) juce::Time::getHighResolutionTicksPerSecond();
+
     if (s.model != nullptr)
     {
+        const auto t0 = juce::Time::getHighResolutionTicks();
         float* p = out.getWritePointer (0);
         float* io[1] = { p };
         s.model->process (io, io, n);       // in-place, mono
+        AudioHealth::notePlugin ("NAM:model",
+            (int) ((double) (juce::Time::getHighResolutionTicks() - t0) * perTick));
     }
 
     if (s.cabEnabled.load() && s.cabLoaded.load())
     {
+        const auto t0 = juce::Time::getHighResolutionTicks();
         juce::dsp::AudioBlock<float> blk (out.getArrayOfWritePointers(), 1, (size_t) n);
         s.cab.process (juce::dsp::ProcessContextReplacing<float> (blk));
+        AudioHealth::notePlugin ("NAM:cab",
+            (int) ((double) (juce::Time::getHighResolutionTicks() - t0) * perTick));
     }
 }
 

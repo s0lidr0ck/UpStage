@@ -48,6 +48,9 @@ void FxBus::prepare (double sampleRate, int blockSize)
     currentSampleRate = sampleRate;
     currentBlockSize  = blockSize;
 
+    rtPadded.setSize (kMaxPluginChannels, blockSize, false, true, false);
+    rtPluginMidi.ensureSize (2048);
+
     juce::ScopedLock sl (chainLock);
     for (auto* entry : pluginChain)
     {
@@ -147,6 +150,7 @@ bool FxBus::addPlugin (const juce::PluginDescription& desc,
             auto* entry       = new PluginEntry();
             entry->processor  = std::move (instance);
             entry->identifier = desc.createIdentifierString();
+            entry->cachedName = entry->processor->getName();
             entry->bypassed   = false;
 
             placeEntry (entry, slot, callback);
@@ -331,22 +335,32 @@ void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples, juce
         if (entry->processor == nullptr) continue;
         if (entry->bypassed)             continue;
 
-        juce::MidiBuffer pluginMidi (midi);
-        auto expected = entry->processor->getTotalNumInputChannels();
+        // See ChannelStrip - these were per-plugin, per-block heap allocations.
+        rtPluginMidi.clear();
+        rtPluginMidi.addEvents (midi, 0, -1, 0);
+
+        const auto expected = entry->processor->getTotalNumInputChannels();
+        const auto tStart = juce::Time::getHighResolutionTicks();
+
         if (expected > buffer.getNumChannels())
         {
-            juce::AudioBuffer<float> padded (expected, buffer.getNumSamples());
-            padded.clear();
+            rtPadded.setSize (expected, buffer.getNumSamples(), false, false, true);
+            rtPadded.clear();
             for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                padded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
-            entry->processor->processBlock (padded, pluginMidi);
+                rtPadded.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            entry->processor->processBlock (rtPadded, rtPluginMidi);
             for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                buffer.copyFrom (ch, 0, padded, ch, 0, buffer.getNumSamples());
+                buffer.copyFrom (ch, 0, rtPadded, ch, 0, buffer.getNumSamples());
         }
         else
         {
-            entry->processor->processBlock (buffer, pluginMidi);
+            entry->processor->processBlock (buffer, rtPluginMidi);
         }
+
+        AudioHealth::notePlugin (
+            entry->cachedName.toRawUTF8(),
+            (int) ((double) (juce::Time::getHighResolutionTicks() - tStart)
+                   * 1.0e6 / (double) juce::Time::getHighResolutionTicksPerSecond()));
     }
 }
 

@@ -56,6 +56,16 @@ struct PluginModuleKeeper
         if (instance == nullptr)
             return;
 
+        // ---- TEMPORARILY DISABLED (bisecting an audio regression) ----
+        // Parking instances keeps their DLLs mapped, but it also keeps every
+        // thread those plugins spawned running forever - and releaseResources()
+        // does not stop them. UJAM's UFX plugins embed a Node.js runtime; UAD
+        // and Waves run licensing threads. With one parked instance per plugin
+        // type that is continuous background CPU competing with the audio
+        // thread. Suspected cause of a large dropout regression.
+        return;
+        // ---------------------------------------------------------------
+
         // Internal rows live in our own binary - nothing to keep loaded.
         if (identifier.startsWith ("UPSTAGE_INTERNAL:"))
             return;   // unique_ptr destroys it here, as before
