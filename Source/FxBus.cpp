@@ -1,5 +1,6 @@
 #include "FxBus.h"
 #include "PluginModuleKeeper.h"
+#include "AudioHealth.h"
 
 //==============================================================================
 FxBus::FxBus (juce::AudioPluginFormatManager& fm)
@@ -319,7 +320,10 @@ void FxBus::processBlock (juce::AudioBuffer<float>& buffer, int numSamples, juce
     // block through untouched rather than stalling the audio thread.
     juce::ScopedTryLock sl (chainLock);
     if (! sl.isLocked())
+    {
+        AudioHealth::noteLockMiss();       // master inserts skipped this block
         return;
+    }
 
     for (auto* entry : pluginChain)
     {
@@ -352,11 +356,21 @@ FxBus::State FxBus::getState() const
     State s;
     s.bypassed = bypassed.load();
 
-    juce::ScopedLock sl (chainLock);
-    for (int i = 0; i < pluginChain.size(); ++i)
+    // See ChannelStrip::getState - the lock is released before the slow
+    // getStateInformation calls so the audio thread's try-lock keeps winning.
+    struct Snapshot { int slotIndex; PluginEntry* entry; };
+    juce::Array<Snapshot> snapshot;
     {
-        auto* entry = pluginChain[i];
-        if (entry == nullptr) continue;   // empty slot - saved as a gap
+        juce::ScopedLock sl (chainLock);
+        for (int i = 0; i < pluginChain.size(); ++i)
+            if (auto* e = pluginChain[i])
+                snapshot.add ({ i, e });
+    }
+
+    for (const auto& snap : snapshot)
+    {
+        const int i = snap.slotIndex;
+        auto* entry = snap.entry;
 
         PluginSlotState slot;
         slot.slotIndex        = i;

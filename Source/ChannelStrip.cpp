@@ -2,6 +2,7 @@
 #include "NamAmpProcessor.h"
 #include "NamIrProcessor.h"
 #include "PluginModuleKeeper.h"
+#include "AudioHealth.h"
 
 ChannelStrip::ChannelStrip (int index, juce::AudioPluginFormatManager& fm)
     : channelIndex (index), formatManager (fm)
@@ -402,6 +403,8 @@ void ChannelStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuf
         // that — if the chain is busy, pass this block through the inserts
         // untouched rather than freezing.
         juce::ScopedTryLock sl (chainLock);
+        if (! sl.isLocked())
+            AudioHealth::noteLockMiss();   // audio passes through UNPROCESSED
         if (sl.isLocked())
         {
             for (auto* entry : pluginChain)
@@ -486,22 +489,42 @@ ChannelState ChannelStrip::getState() const
     state.outputGain  = outputGainTarget.load();
     state.pan         = pan.load();
 
-    juce::ScopedLock sl (chainLock);
-    for (int i = 0; i < pluginChain.size(); ++i)
+    // Snapshot the chain under the lock, then release it BEFORE calling
+    // getStateInformation.
+    //
+    // Holding chainLock across getStateInformation on every plugin took long
+    // enough (tens of ms with a full rack) that the audio thread's ScopedTryLock
+    // failed for hundreds of consecutive blocks - and its fallback is to pass
+    // audio through the inserts UNPROCESSED. The result was an audible pop
+    // either side of every autosave, with no dropout the driver could see.
+    //
+    // Releasing the lock first is safe: chainLock exists to stop the audio
+    // thread reading the chain array while the message thread restructures it.
+    // getState() runs on the message thread, and so does every mutation, so
+    // nothing can restructure the chain underneath this. Calling
+    // getStateInformation while audio runs is normal - it is what every host
+    // does when saving, and JUCE documents it as a message-thread call.
+    struct Snapshot { int slotIndex; PluginEntry* entry; };
+    juce::Array<Snapshot> snapshot;
     {
-        auto* entry = pluginChain[i];
-        if (entry == nullptr) continue;   // empty slot - saved as a gap
+        juce::ScopedLock sl (chainLock);
+        for (int i = 0; i < pluginChain.size(); ++i)
+            if (auto* entry = pluginChain[i])
+                snapshot.add ({ i, entry });
+    }
 
+    for (const auto& s : snapshot)
+    {
         PluginSlotState slot;
-        slot.slotIndex        = i;
-        slot.pluginIdentifier = entry->identifier;
-        slot.pluginName       = entry->processor ? entry->processor->getName() : "";
-        slot.isBypassed       = entry->bypassed;
-        slot.tint             = entry->tint;
-        slot.nickname         = entry->nickname;
+        slot.slotIndex        = s.slotIndex;
+        slot.pluginIdentifier = s.entry->identifier;
+        slot.pluginName       = s.entry->processor ? s.entry->processor->getName() : "";
+        slot.isBypassed       = s.entry->bypassed;
+        slot.tint             = s.entry->tint;
+        slot.nickname         = s.entry->nickname;
 
-        if (entry->processor != nullptr)
-            entry->processor->getStateInformation (slot.stateData);
+        if (s.entry->processor != nullptr)
+            s.entry->processor->getStateInformation (slot.stateData);
 
         state.plugins.add (slot);
     }

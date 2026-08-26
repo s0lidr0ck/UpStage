@@ -1,4 +1,5 @@
 ﻿#include "MainComponent.h"
+#include "AudioHealth.h"
 #include "MixerLookAndFeel.h"
 #include "NamAmpProcessor.h"
 #include "NamIrProcessor.h"
@@ -999,6 +1000,13 @@ void MainComponent::prepareToPlay (int blockSize, double sr)
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // Time the whole callback. If we take longer than the device's budget for
+    // this block, a dropout is certain - whether or not the driver reports an
+    // XRun (the Focusrite USB ASIO driver does not). Reading the high-res tick
+    // counter is a bare register read: no allocation, no lock, RT-safe.
+    const juce::int64 blockStartTicks = juce::Time::getHighResolutionTicks();
+
     auto* buffer = info.buffer;
 
     // Guard against an over-large or zero block (e.g. device reconfig). The
@@ -1339,6 +1347,17 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
     // ---- Write to ASIO output ----
     for (int ch = 0; ch < buffer->getNumChannels() && ch < 2; ++ch)
         buffer->copyFrom (ch, info.startSample, work, ch, 0, info.numSamples);
+
+    // ---- Did we make the deadline? ----
+    if (currentSampleRate > 0.0)
+    {
+        const double elapsedSec = (double) (juce::Time::getHighResolutionTicks() - blockStartTicks)
+                                / (double) juce::Time::getHighResolutionTicksPerSecond();
+        const double budgetSec  = (double) info.numSamples / currentSampleRate;
+
+        if (elapsedSec > budgetSec)
+            AudioHealth::noteOverrun();
+    }
 }
 
 void MainComponent::releaseResources()
@@ -2391,7 +2410,7 @@ void MainComponent::resized()
     // Footer status bar
     auto statusArea = area.removeFromBottom (22);
     ramLabel.setBounds (statusArea.removeFromRight (90).reduced (4, 2));
-    cpuLabel.setBounds (statusArea.removeFromRight (230).reduced (4, 2));  // CPU + peak + xruns
+    cpuLabel.setBounds (statusArea.removeFromRight (360).reduced (4, 2));  // CPU + peak + xrun + ovr + lock
     statusStateLabel.setBounds (statusArea.removeFromRight (200).reduced (4, 2));
     statusLabel.setBounds (statusArea.reduced (8, 2));
 
@@ -2987,12 +3006,21 @@ void MainComponent::timerCallback()
             }
         }
 
+        // OVR = we missed the block deadline (real CPU problem).
+        // LOCK = a strip passed audio through unprocessed because the message
+        //        thread held the chain lock (a pop with no dropout).
+        // They sound the same and have completely different causes.
+        const int overruns   = AudioHealth::getOverruns();
+        const int lockMisses = AudioHealth::getLockMisses();
+
         cpuLabel.setText ("CPU: " + juce::String (cpuUsage, 1) + "%"
                           + "  PK: " + juce::String (shownPeak, 1) + "%"
-                          + xrunText,
+                          + xrunText
+                          + "  OVR: " + juce::String (overruns)
+                          + "  LOCK: " + juce::String (lockMisses),
                           juce::dontSendNotification);
         cpuLabel.setColour (juce::Label::textColourId,
-            (xrunsSinceStart > 0 || shownPeak > 80.0) ? juce::Colour (0xffcc4444)
+            (xrunsSinceStart > 0 || overruns > 0 || lockMisses > 0) ? juce::Colour (0xffcc4444)
             : shownPeak > 50.0 ? juce::Colour (0xffccaa44)
             : juce::Colour (0xff88aa88));
 
